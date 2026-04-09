@@ -11,8 +11,8 @@ The plugin itself does not reverse-engineer CATPart directly. Instead, it wraps 
 After conversion, the script now inspects supported outputs automatically:
 
 - `STEP`: product names, schema, unit, topology counts, inferred bounding box
-- `OBJ`: vertex count, face count, object/material names, exact bounding box
-- `STL`: triangle count, encoding type, exact bounding box
+- `OBJ`: vertex count, polygon face count, triangle count, area, watertight volume, centroids, object/material names, exact bounding box
+- `STL`: triangle count, encoding type, area, watertight volume, centroids, exact bounding box
 
 ## Why `STEP`
 
@@ -50,6 +50,16 @@ python3 scripts/convert_catpart.py \
   /path/to/part.CATPart \
   --format obj \
   --output-dir /path/to/output
+```
+
+Analyze an existing exported file without re-running conversion:
+
+```bash
+python3 scripts/convert_catpart.py \
+  /path/to/mesh.obj \
+  --analysis-only \
+  --assume-unit mm \
+  --report /path/to/mesh.analysis.json
 ```
 
 ## Backend Configuration
@@ -94,6 +104,8 @@ python3 scripts/convert_catpart.py /path/to/part.CATPart
 
 - Add this folder to your Codex local plugin path or marketplace as needed.
 - If no backend is installed, the script exits with a clear setup message instead of failing silently.
+- `--probe` now reports both conversion backend availability and local analysis capabilities.
 - For multi-file use, pass multiple input files and an `--output-dir`.
 - The plugin still does not natively decode proprietary `CATPart` internals; engineering data is derived from the converted exchange file.
 - For `STEP`, the bounding box is inferred from `CARTESIAN_POINT` records, so it is useful but should not be treated as a certified metrology result.
+- For `OBJ/STL`, surface area is exact for the mesh. Volume and volume centroid are only reported when the mesh appears watertight and orientation-consistent.

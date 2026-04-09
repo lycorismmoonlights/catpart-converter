@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
+import math
 import os
 import re
 import shlex
@@ -31,6 +33,7 @@ FORMAT_EXTENSIONS = {
     "gltf": ".gltf",
     "glb": ".glb",
 }
+ANALYSIS_FORMATS = {"step", "stp", "obj", "stl"}
 
 CAD_EXCHANGER_EXECUTABLES = [
     "ExchangerConv",
@@ -40,6 +43,13 @@ CAD_EXCHANGER_EXECUTABLES = [
 
 CAD_EXCHANGER_PATHS = [
     "/Applications/CAD Exchanger Lab.app/Contents/MacOS/ExchangerConv",
+]
+FREECAD_EXECUTABLES = [
+    "FreeCADCmd",
+    "freecadcmd",
+]
+FREECAD_PATHS = [
+    "/Applications/FreeCAD.app/Contents/Resources/bin/FreeCADCmd",
 ]
 
 CAD_EXCHANGER_TEMPLATE = '"{executable}" -i "{input}" -e "{output}"'
@@ -149,6 +159,15 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip post-conversion engineering analysis of STEP/OBJ/STL outputs.",
     )
+    parser.add_argument(
+        "--analysis-only",
+        action="store_true",
+        help="Analyze existing STEP/OBJ/STL files without running a CATPart conversion backend.",
+    )
+    parser.add_argument(
+        "--assume-unit",
+        help="Attach a unit label such as mm or m to mesh analysis outputs when the file format has no native unit metadata.",
+    )
     return parser.parse_args()
 
 
@@ -165,6 +184,10 @@ def sha256_of(path: Path) -> str:
 
 def normalize_path(path_value: str | Path) -> str:
     return str(Path(path_value).expanduser().resolve())
+
+
+def module_is_available(module_name: str) -> bool:
+    return importlib.util.find_spec(module_name) is not None
 
 
 def round_number(value: float, digits: int = 6) -> float:
@@ -212,6 +235,103 @@ def parse_float_triplet(raw_values: str) -> tuple[float, float, float] | None:
     if len(values) < 3:
         return None
     return values[0], values[1], values[2]
+
+
+def vector_subtract(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
+    return a[0] - b[0], a[1] - b[1], a[2] - b[2]
+
+
+def vector_cross(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
+    return (
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    )
+
+
+def vector_dot(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def vector_norm(a: tuple[float, float, float]) -> float:
+    return math.sqrt(vector_dot(a, a))
+
+
+def triangle_area_from_points(
+    a: tuple[float, float, float],
+    b: tuple[float, float, float],
+    c: tuple[float, float, float],
+) -> float:
+    return 0.5 * vector_norm(vector_cross(vector_subtract(b, a), vector_subtract(c, a)))
+
+
+def average_points(points: list[tuple[float, float, float]]) -> list[float] | None:
+    if not points:
+        return None
+    count = float(len(points))
+    totals = [0.0, 0.0, 0.0]
+    for point in points:
+        totals[0] += point[0]
+        totals[1] += point[1]
+        totals[2] += point[2]
+    return [round_number(value / count) for value in totals]
+
+
+def polygon_face_vertex_indices(face_tokens: list[str], vertex_count: int) -> list[int]:
+    indices: list[int] = []
+    for token in face_tokens:
+        vertex_ref = token.split("/")[0]
+        if not vertex_ref:
+            continue
+        raw_index = int(vertex_ref)
+        resolved_index = raw_index - 1 if raw_index > 0 else vertex_count + raw_index
+        indices.append(resolved_index)
+    return indices
+
+
+def triangulate_face(face_indices: list[int]) -> list[tuple[int, int, int]]:
+    if len(face_indices) < 3:
+        return []
+    if len(face_indices) == 3:
+        return [(face_indices[0], face_indices[1], face_indices[2])]
+    return [
+        (face_indices[0], face_indices[index], face_indices[index + 1])
+        for index in range(1, len(face_indices) - 1)
+    ]
+
+
+def mesh_measurement_units(unit: str | None) -> dict[str, str | None]:
+    if not unit:
+        return {
+            "length": None,
+            "area": None,
+            "volume": None,
+        }
+    return {
+        "length": unit,
+        "area": f"{unit}^2",
+        "volume": f"{unit}^3",
+    }
+
+
+def deduped_vertex_index(
+    point: tuple[float, float, float],
+    *,
+    vertex_map: dict[tuple[float, float, float], int],
+    vertices: list[tuple[float, float, float]],
+    precision: int = 9,
+) -> int:
+    key = (
+        round(point[0], precision),
+        round(point[1], precision),
+        round(point[2], precision),
+    )
+    if key in vertex_map:
+        return vertex_map[key]
+    index = len(vertices)
+    vertex_map[key] = index
+    vertices.append(point)
+    return index
 
 
 def extract_quoted_strings(raw_value: str) -> list[str]:
@@ -376,9 +496,130 @@ def analyze_step_file(path: Path) -> dict[str, Any]:
     return analysis
 
 
-def analyze_obj_file(path: Path) -> dict[str, Any]:
+def analyze_triangle_mesh(
+    *,
+    vertices: list[tuple[float, float, float]],
+    triangles: list[tuple[int, int, int]],
+    kind: str,
+    unit: str | None,
+    extra_fields: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     bbox = create_bbox()
-    vertex_count = 0
+    undirected_edge_counts: Counter[tuple[int, int]] = Counter()
+    directed_edge_counts: Counter[tuple[int, int]] = Counter()
+    degenerate_triangles = 0
+    total_area = 0.0
+    area_centroid_sum = [0.0, 0.0, 0.0]
+    signed_volume = 0.0
+    volume_centroid_sum = [0.0, 0.0, 0.0]
+
+    for point in vertices:
+        update_bbox(bbox, point)
+
+    for triangle in triangles:
+        a_idx, b_idx, c_idx = triangle
+        a = vertices[a_idx]
+        b = vertices[b_idx]
+        c = vertices[c_idx]
+
+        area = triangle_area_from_points(a, b, c)
+        if area <= 1e-12:
+            degenerate_triangles += 1
+            continue
+
+        total_area += area
+        surface_centroid = (
+            (a[0] + b[0] + c[0]) / 3.0,
+            (a[1] + b[1] + c[1]) / 3.0,
+            (a[2] + b[2] + c[2]) / 3.0,
+        )
+        area_centroid_sum[0] += surface_centroid[0] * area
+        area_centroid_sum[1] += surface_centroid[1] * area
+        area_centroid_sum[2] += surface_centroid[2] * area
+
+        tetra_volume = vector_dot(a, vector_cross(b, c)) / 6.0
+        signed_volume += tetra_volume
+        tetra_centroid = (
+            (a[0] + b[0] + c[0]) / 4.0,
+            (a[1] + b[1] + c[1]) / 4.0,
+            (a[2] + b[2] + c[2]) / 4.0,
+        )
+        volume_centroid_sum[0] += tetra_centroid[0] * tetra_volume
+        volume_centroid_sum[1] += tetra_centroid[1] * tetra_volume
+        volume_centroid_sum[2] += tetra_centroid[2] * tetra_volume
+
+        for start, end in ((a_idx, b_idx), (b_idx, c_idx), (c_idx, a_idx)):
+            edge = (start, end) if start < end else (end, start)
+            undirected_edge_counts[edge] += 1
+            directed_edge_counts[(start, end)] += 1
+
+    watertight = bool(undirected_edge_counts) and all(count == 2 for count in undirected_edge_counts.values())
+    orientation_consistent = watertight and all(
+        directed_edge_counts.get((edge[0], edge[1]), 0) == 1
+        and directed_edge_counts.get((edge[1], edge[0]), 0) == 1
+        for edge in undirected_edge_counts
+    )
+
+    abs_signed_volume = abs(signed_volume)
+    surface_centroid = None
+    if total_area > 1e-12:
+        surface_centroid = [
+            round_number(area_centroid_sum[index] / total_area)
+            for index in range(3)
+        ]
+
+    volume_centroid = None
+    if orientation_consistent and abs_signed_volume > 1e-12:
+        orientation_scale = signed_volume if signed_volume != 0 else 1.0
+        volume_centroid = [
+            round_number(volume_centroid_sum[index] / orientation_scale)
+            for index in range(3)
+        ]
+
+    bbox_payload = finalize_bbox(bbox, unit=unit, inferred=False)
+    bbox_diagonal = None
+    if bbox_payload:
+        size = bbox_payload["size"]
+        bbox_diagonal = round_number(math.sqrt(size[0] ** 2 + size[1] ** 2 + size[2] ** 2))
+
+    units = mesh_measurement_units(unit)
+    analysis = {
+        "kind": kind,
+        "read_strategy": "polyhedral_mesh_analysis",
+        "native_catpart_read": False,
+        "precision_note": (
+            "Derived from converted mesh output. Surface area is exact for the mesh; "
+            "volume and volume centroid are reported only when the mesh appears watertight "
+            "and orientation-consistent."
+        ),
+        "vertex_count": len(vertices),
+        "triangle_count": len(triangles),
+        "degenerate_triangle_count": degenerate_triangles,
+        "assumed_unit": unit,
+        "surface_area": round_number(total_area),
+        "surface_area_unit": units["area"],
+        "signed_volume": round_number(signed_volume),
+        "enclosed_volume": round_number(abs_signed_volume) if orientation_consistent else None,
+        "volume_unit": units["volume"],
+        "watertight": watertight,
+        "orientation_consistent": orientation_consistent,
+        "boundary_edge_count": sum(1 for count in undirected_edge_counts.values() if count == 1),
+        "non_manifold_edge_count": sum(1 for count in undirected_edge_counts.values() if count > 2),
+        "bbox_native_units": bbox_payload,
+        "bbox_diagonal": bbox_diagonal,
+        "bbox_diagonal_unit": units["length"],
+        "vertex_centroid": average_points(vertices),
+        "surface_centroid": surface_centroid,
+        "volume_centroid": volume_centroid,
+    }
+    if extra_fields:
+        analysis.update(extra_fields)
+    return analysis
+
+
+def analyze_obj_file(path: Path, unit: str | None = None) -> dict[str, Any]:
+    vertices: list[tuple[float, float, float]] = []
+    triangles: list[tuple[int, int, int]] = []
     face_count = 0
     objects: list[str] = []
     materials: list[str] = []
@@ -391,17 +632,19 @@ def analyze_obj_file(path: Path) -> dict[str, Any]:
 
             vertex_match = OBJ_VERTEX_RE.match(line)
             if vertex_match:
-                vertex_count += 1
-                point = (
+                vertices.append(
+                    (
                     float(vertex_match.group(1)),
                     float(vertex_match.group(2)),
                     float(vertex_match.group(3)),
+                    )
                 )
-                update_bbox(bbox, point)
                 continue
 
             if OBJ_FACE_RE.match(line):
                 face_count += 1
+                face_indices = polygon_face_vertex_indices(line.split()[1:], len(vertices))
+                triangles.extend(triangulate_face(face_indices))
                 continue
 
             object_match = OBJ_OBJECT_RE.match(line)
@@ -417,17 +660,17 @@ def analyze_obj_file(path: Path) -> dict[str, Any]:
                 if material not in materials:
                     materials.append(material)
 
-    return {
-        "kind": "obj",
-        "read_strategy": "textual_obj_analysis",
-        "native_catpart_read": False,
-        "precision_note": "Derived from converted mesh output. Mesh statistics are exact for the OBJ file.",
-        "vertex_count": vertex_count,
+    return analyze_triangle_mesh(
+        vertices=vertices,
+        triangles=triangles,
+        kind="obj",
+        unit=unit,
+        extra_fields={
         "face_count": face_count,
         "objects": objects,
         "materials": materials,
-        "bbox_native_units": finalize_bbox(bbox, unit=None, inferred=False),
-    }
+        },
+    )
 
 
 def is_binary_stl(path: Path) -> bool:
@@ -440,8 +683,10 @@ def is_binary_stl(path: Path) -> bool:
     return 84 + triangle_count * 50 == file_size
 
 
-def analyze_binary_stl(path: Path) -> dict[str, Any]:
-    bbox = create_bbox()
+def analyze_binary_stl(path: Path, unit: str | None = None) -> dict[str, Any]:
+    vertices: list[tuple[float, float, float]] = []
+    triangles: list[tuple[int, int, int]] = []
+    vertex_map: dict[tuple[float, float, float], int] = {}
     with path.open("rb") as handle:
         header = handle.read(84)
         triangle_count = struct.unpack("<I", header[80:84])[0]
@@ -449,25 +694,34 @@ def analyze_binary_stl(path: Path) -> dict[str, Any]:
             record = handle.read(50)
             if len(record) < 50:
                 break
-            vertices = struct.unpack("<12f", record[:48])[3:]
-            for index in range(0, 9, 3):
-                update_bbox(bbox, (vertices[index], vertices[index + 1], vertices[index + 2]))
+            raw_vertices = struct.unpack("<12f", record[:48])[3:]
+            triangle_vertices = [
+                (raw_vertices[index], raw_vertices[index + 1], raw_vertices[index + 2])
+                for index in range(0, 9, 3)
+            ]
+            triangle_indices = tuple(
+                deduped_vertex_index(point, vertex_map=vertex_map, vertices=vertices)
+                for point in triangle_vertices
+            )
+            triangles.append(triangle_indices)
 
-    return {
-        "kind": "stl",
-        "encoding": "binary",
-        "read_strategy": "binary_stl_analysis",
-        "native_catpart_read": False,
-        "precision_note": "Derived from converted mesh output. Triangle count and bounding box are exact for the STL file.",
-        "triangle_count": triangle_count,
-        "bbox_native_units": finalize_bbox(bbox, unit=None, inferred=False),
-    }
+    return analyze_triangle_mesh(
+        vertices=vertices,
+        triangles=triangles,
+        kind="stl",
+        unit=unit,
+        extra_fields={
+            "encoding": "binary",
+        },
+    )
 
 
-def analyze_ascii_stl(path: Path) -> dict[str, Any]:
-    bbox = create_bbox()
-    triangle_count = 0
+def analyze_ascii_stl(path: Path, unit: str | None = None) -> dict[str, Any]:
+    vertices: list[tuple[float, float, float]] = []
+    triangles: list[tuple[int, int, int]] = []
+    vertex_map: dict[tuple[float, float, float], int] = {}
     solid_names: list[str] = []
+    current_triangle: list[tuple[float, float, float]] = []
 
     with path.open("r", encoding="utf-8", errors="ignore") as handle:
         for raw_line in handle:
@@ -480,39 +734,53 @@ def analyze_ascii_stl(path: Path) -> dict[str, Any]:
                     solid_names.append(name)
                 continue
             if line.startswith("facet normal"):
-                triangle_count += 1
+                current_triangle = []
                 continue
             if line.startswith("vertex "):
                 point = parse_float_triplet(line[len("vertex ") :])
                 if point is not None:
-                    update_bbox(bbox, point)
+                    current_triangle.append(point)
+                    if len(current_triangle) == 3:
+                        triangle_indices = tuple(
+                            deduped_vertex_index(point, vertex_map=vertex_map, vertices=vertices)
+                            for point in current_triangle
+                        )
+                        triangles.append(triangle_indices)
+                        current_triangle = []
 
-    return {
-        "kind": "stl",
-        "encoding": "ascii",
-        "read_strategy": "ascii_stl_analysis",
-        "native_catpart_read": False,
-        "precision_note": "Derived from converted mesh output. Triangle count and bounding box are exact for the STL file.",
-        "triangle_count": triangle_count,
-        "solid_names": solid_names,
-        "bbox_native_units": finalize_bbox(bbox, unit=None, inferred=False),
-    }
+    return analyze_triangle_mesh(
+        vertices=vertices,
+        triangles=triangles,
+        kind="stl",
+        unit=unit,
+        extra_fields={
+            "encoding": "ascii",
+            "solid_names": solid_names,
+        },
+    )
 
 
-def analyze_stl_file(path: Path) -> dict[str, Any]:
+def analyze_stl_file(path: Path, unit: str | None = None) -> dict[str, Any]:
     if is_binary_stl(path):
-        return analyze_binary_stl(path)
-    return analyze_ascii_stl(path)
+        return analyze_binary_stl(path, unit=unit)
+    return analyze_ascii_stl(path, unit=unit)
 
 
-def analyze_output_file(path: Path, output_format: str) -> dict[str, Any] | None:
+def analyze_output_file(path: Path, output_format: str, assume_unit: str | None = None) -> dict[str, Any] | None:
     normalized = output_format.lower()
     if normalized in {"step", "stp"}:
         return analyze_step_file(path)
     if normalized == "obj":
-        return analyze_obj_file(path)
+        return analyze_obj_file(path, unit=assume_unit)
     if normalized == "stl":
-        return analyze_stl_file(path)
+        return analyze_stl_file(path, unit=assume_unit)
+    return None
+
+
+def infer_analysis_format(path: Path) -> str | None:
+    suffix = path.suffix.lower().lstrip(".")
+    if suffix in ANALYSIS_FORMATS:
+        return suffix
     return None
 
 
@@ -538,20 +806,90 @@ def format_console_summary(analysis: dict[str, Any]) -> str:
     if kind == "obj":
         bbox = analysis.get("bbox_native_units")
         bbox_text = f"bbox={bbox.get('size')}" if bbox else "bbox unavailable"
+        area = analysis.get("surface_area")
+        volume = analysis.get("enclosed_volume")
+        area_text = f"area={area} {analysis.get('surface_area_unit') or ''}".strip()
+        volume_text = (
+            f"volume={volume} {analysis.get('volume_unit') or ''}".strip()
+            if volume is not None
+            else "volume=n/a"
+        )
         return (
             f"OBJ analysis: vertices={analysis.get('vertex_count', 0)}; "
-            f"faces={analysis.get('face_count', 0)}; {bbox_text}"
+            f"faces={analysis.get('face_count', 0)}; triangles={analysis.get('triangle_count', 0)}; "
+            f"{area_text}; {volume_text}; watertight={analysis.get('watertight')}; {bbox_text}"
         )
 
     if kind == "stl":
         bbox = analysis.get("bbox_native_units")
         bbox_text = f"bbox={bbox.get('size')}" if bbox else "bbox unavailable"
+        area = analysis.get("surface_area")
+        volume = analysis.get("enclosed_volume")
+        area_text = f"area={area} {analysis.get('surface_area_unit') or ''}".strip()
+        volume_text = (
+            f"volume={volume} {analysis.get('volume_unit') or ''}".strip()
+            if volume is not None
+            else "volume=n/a"
+        )
         return (
             f"STL analysis: encoding={analysis.get('encoding')}; "
-            f"triangles={analysis.get('triangle_count', 0)}; {bbox_text}"
+            f"triangles={analysis.get('triangle_count', 0)}; "
+            f"{area_text}; {volume_text}; watertight={analysis.get('watertight')}; {bbox_text}"
         )
 
     return "Analysis available"
+
+
+def discover_exact_geometry_backend() -> dict[str, Any]:
+    discovered_freecad = discover_executable(FREECAD_EXECUTABLES, FREECAD_PATHS)
+    return {
+        "python_modules": {
+            "OCP": module_is_available("OCP"),
+            "cadquery": module_is_available("cadquery"),
+            "numpy": module_is_available("numpy"),
+        },
+        "freecad_cmd": {
+            "available": discovered_freecad is not None,
+            "path": discovered_freecad[0] if discovered_freecad else None,
+            "detected_via": discovered_freecad[1] if discovered_freecad else None,
+        },
+    }
+
+
+def probe_environment(args: argparse.Namespace) -> dict[str, Any]:
+    try:
+        backend = resolve_backend(args)
+    except BackendNotFoundError as exc:
+        conversion_backend = {
+            "available": False,
+            "error": str(exc),
+        }
+    else:
+        conversion_backend = {
+            "available": True,
+            "name": backend.name,
+            "executable": backend.executable,
+            "template": backend.template,
+            "detected_via": backend.detected_via,
+        }
+
+    return {
+        "conversion_backend": conversion_backend,
+        "analysis_capabilities": {
+            "analysis_only_mode": True,
+            "textual_step_analysis": True,
+            "polyhedral_obj_analysis": True,
+            "polyhedral_stl_analysis": True,
+            "mesh_surface_area": True,
+            "mesh_volume_when_watertight": True,
+            "exact_brep_backend": discover_exact_geometry_backend(),
+        },
+    }
+
+
+def print_probe(args: argparse.Namespace) -> None:
+    json.dump(probe_environment(args), sys.stdout, indent=2)
+    sys.stdout.write("\n")
 
 
 def discover_executable(candidate_names: list[str], extra_paths: list[str]) -> tuple[str, str] | None:
@@ -696,6 +1034,7 @@ def convert_one(
     overwrite: bool,
     dry_run: bool,
     analyze: bool,
+    assume_unit: str | None,
 ) -> dict[str, Any]:
     started_at = time.time()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -750,7 +1089,7 @@ def convert_one(
     result["output_size_bytes"] = output_path.stat().st_size
     if analyze:
         try:
-            analysis = analyze_output_file(output_path, output_format)
+            analysis = analyze_output_file(output_path, output_format, assume_unit=assume_unit)
         except Exception as exc:  # pragma: no cover - defensive reporting
             result["analysis_error"] = str(exc)
         else:
@@ -759,20 +1098,73 @@ def convert_one(
     return result
 
 
-def print_probe(backend: BackendSpec) -> None:
-    payload = {
-        "backend": backend.name,
-        "executable": backend.executable,
-        "template": backend.template,
-        "detected_via": backend.detected_via,
+def analyze_existing_file(
+    path: Path,
+    *,
+    assume_unit: str | None,
+) -> dict[str, Any]:
+    analysis_format = infer_analysis_format(path)
+    if analysis_format is None:
+        raise ValueError(
+            f"Unsupported analysis input: {path}. Supported extensions are: "
+            + ", ".join(sorted(ANALYSIS_FORMATS))
+        )
+
+    analysis = analyze_output_file(path, analysis_format, assume_unit=assume_unit)
+    if analysis is None:
+        raise ValueError(f"No analyzer is available for: {path}")
+
+    return {
+        "source": str(path),
+        "format": analysis_format,
+        "status": "analyzed",
+        "source_sha256": sha256_of(path),
+        "source_size_bytes": path.stat().st_size,
+        "analysis": analysis,
     }
-    json.dump(payload, sys.stdout, indent=2)
-    sys.stdout.write("\n")
 
 
 def main() -> int:
     args = parse_args()
     log_stream = sys.stderr if args.report == "-" else sys.stdout
+
+    if args.probe:
+        print_probe(args)
+        return 0
+
+    inputs = validate_inputs(args)
+    if args.analysis_only:
+        results: list[dict[str, Any]] = []
+        failures = 0
+        for input_path in inputs:
+            try:
+                result = analyze_existing_file(input_path, assume_unit=args.assume_unit)
+            except ValueError as exc:
+                failures += 1
+                result = {
+                    "source": str(input_path),
+                    "status": "failed",
+                    "error": str(exc),
+                }
+                print(f"[FAILED] {input_path.name}: {exc}", file=sys.stderr)
+            else:
+                print(f"[OK] analyzed {input_path}", file=log_stream)
+                print(f"  {format_console_summary(result['analysis'])}", file=log_stream)
+
+            results.append(result)
+
+        report_payload = {
+            "results": results,
+            "summary": {
+                "total": len(results),
+                "failed": failures,
+                "succeeded": len(results) - failures,
+                "mode": "analysis_only",
+            },
+        }
+        if args.report:
+            write_report(args.report, report_payload)
+        return 1 if failures else 0
 
     try:
         backend = resolve_backend(args)
@@ -780,11 +1172,6 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
-    if args.probe:
-        print_probe(backend)
-        return 0
-
-    inputs = validate_inputs(args)
     results: list[dict[str, Any]] = []
     failures = 0
 
@@ -805,6 +1192,7 @@ def main() -> int:
                 overwrite=args.overwrite,
                 dry_run=args.dry_run,
                 analyze=not args.skip_analysis,
+                assume_unit=args.assume_unit,
             )
         except FileExistsError as exc:
             result = {
