@@ -1,6 +1,6 @@
 ---
 name: catpart-converter
-description: Convert CATIA CATPart files into readable exchange formats such as STEP, OBJ, and STL by calling the local workspace conversion script, then extract engineering summaries from supported outputs. Use when the user asks to inspect, convert, or ingest CATPart files.
+description: Convert CATIA CATPart files into readable exchange formats such as STEP, OBJ, and STL by calling the local workspace conversion script, then extract engineering summaries from supported outputs. When FreeCAD is available, STEP summaries also include exact B-Rep geometry metrics. Use when the user asks to inspect, convert, or ingest CATPart files.
 ---
 
 # CATPart Converter
@@ -25,7 +25,7 @@ python3 plugins/catpart-converter/scripts/convert_catpart.py "<input.CATPart>" -
 ```
 
 3. If the conversion succeeds, read the terminal summary or JSON report first.
-4. For `STEP`, prefer the generated engineering summary for names, units, and topology counts, then open the `.step` file when deeper inspection is needed.
+4. For `STEP`, prefer the generated engineering summary first. It now combines textual metadata with exact `FreeCAD` geometry measurements when `freecadcmd` is available.
 5. If the backend is missing, explain that the plugin is installed but still needs an external CATIA-capable converter backend.
 
 ## Backend setup
@@ -35,6 +35,13 @@ The script will auto-detect a backend in this order:
 1. `CATPART_CONVERTER_TEMPLATE`
 2. `CATPART_CONVERTER_BIN`
 3. common `CAD Exchanger` executable names and paths
+
+For exact `STEP` geometry analysis it will also auto-detect `freecadcmd` from:
+
+1. `CATPART_FREECAD_CMD`
+2. `PATH`
+3. common macOS app paths
+4. common conda environment locations
 
 You can probe the environment with:
 
@@ -48,6 +55,7 @@ python3 plugins/catpart-converter/scripts/convert_catpart.py --probe
 - Use `OBJ` or `STL` when the user specifically wants mesh output.
 - Write a JSON report with `--report <path>` when you need a durable conversion log.
 - `STEP` summaries are the best option for engineering metadata. Mesh summaries are useful for geometry size and complexity, but not for B-Rep semantics.
+- When `FreeCAD` is available, `STEP` summaries also include exact area, enclosed volume, center of gravity, and a non-inferred bounding box.
 - Use `--analysis-only` when the user already has a converted `STEP`, `OBJ`, or `STL`.
 - Use `--assume-unit mm` or `--assume-unit m` for mesh files when unit labeling matters.
 
