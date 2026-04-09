@@ -1,0 +1,38 @@
+{
+  "name": "catpart-converter",
+  "version": "0.1.0",
+  "description": "Convert CATIA CATPart files into readable exchange formats such as STEP, OBJ, and STL.",
+  "author": {
+    "name": "Local Workspace"
+  },
+  "license": "MIT",
+  "keywords": [
+    "catia",
+    "catpart",
+    "cad",
+    "step",
+    "converter"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "CATPart Converter",
+    "shortDescription": "Turn CATPart files into STEP or mesh formats that Codex can inspect",
+    "longDescription": "A local workspace plugin that wraps an external CATIA-compatible converter and standardizes CATPart exports to STEP, OBJ, STL, IGES, BREP, and related formats for downstream inspection in Codex.",
+    "developerName": "Local Workspace",
+    "category": "Engineering",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Convert this CATPart into STEP so you can inspect it",
+      "Probe the CATPart converter backend in this workspace",
+      "Export a CATPart to OBJ and save a conversion report"
+    ],
+    "brandColor": "#0F766E",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/logo.svg",
+    "screenshots": []
+  }
+}
