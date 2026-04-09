@@ -1,6 +1,6 @@
 ---
 name: catpart-converter
-description: Convert CATIA CATPart files into readable exchange formats such as STEP, OBJ, and STL by calling the local workspace conversion script. Use when the user asks to inspect, convert, or ingest CATPart files.
+description: Convert CATIA CATPart files into readable exchange formats such as STEP, OBJ, and STL by calling the local workspace conversion script, then extract engineering summaries from supported outputs. Use when the user asks to inspect, convert, or ingest CATPart files.
 ---
 
 # CATPart Converter
@@ -12,6 +12,7 @@ Use this skill when the user wants to:
 - convert a `.CATPart` file into a format Codex can inspect
 - inspect CATIA part geometry through a readable exchange format
 - batch-convert CATPart files into `STEP`, `OBJ`, `STL`, `IGES`, or `BREP`
+- extract engineering summaries after conversion
 
 ## Default workflow
 
@@ -22,8 +23,9 @@ Use this skill when the user wants to:
 python3 plugins/catpart-converter/scripts/convert_catpart.py "<input.CATPart>" --format step
 ```
 
-3. If the conversion succeeds, open the generated `.step` file and continue the task.
-4. If the backend is missing, explain that the plugin is installed but still needs an external CATIA-capable converter backend.
+3. If the conversion succeeds, read the terminal summary or JSON report first.
+4. For `STEP`, prefer the generated engineering summary for names, units, and topology counts, then open the `.step` file when deeper inspection is needed.
+5. If the backend is missing, explain that the plugin is installed but still needs an external CATIA-capable converter backend.
 
 ## Backend setup
 
@@ -44,6 +46,7 @@ python3 plugins/catpart-converter/scripts/convert_catpart.py --probe
 - Use `STEP` for downstream analysis in Codex.
 - Use `OBJ` or `STL` when the user specifically wants mesh output.
 - Write a JSON report with `--report <path>` when you need a durable conversion log.
+- `STEP` summaries are the best option for engineering metadata. Mesh summaries are useful for geometry size and complexity, but not for B-Rep semantics.
 
 ## Examples
 

@@ -1,12 +1,18 @@
 # CATPart Converter
 
-`CATPart Converter` is a local Codex plugin that standardizes conversion of CATIA `.CATPart` files into formats Codex can inspect more easily.
+`CATPart Converter` is a local Codex plugin that standardizes conversion of CATIA `.CATPart` files into formats Codex can inspect more easily, then extracts engineering-facing summaries from supported outputs.
 
 The plugin itself does not reverse-engineer CATPart directly. Instead, it wraps a locally installed converter backend and gives you one stable CLI:
 
 - Recommended readable output: `STEP` (`.step` / `.stp`)
 - Mesh outputs: `OBJ`, `STL`, `GLTF`, `GLB`
 - Exchange outputs: `IGES`, `BREP`, `X_T`, `X_B`
+
+After conversion, the script now inspects supported outputs automatically:
+
+- `STEP`: product names, schema, unit, topology counts, inferred bounding box
+- `OBJ`: vertex count, face count, object/material names, exact bounding box
+- `STL`: triangle count, encoding type, exact bounding box
 
 ## Why `STEP`
 
@@ -34,6 +40,8 @@ python3 scripts/convert_catpart.py \
   --format step \
   --report /path/to/part.conversion.json
 ```
+
+The command will print an engineering summary in the terminal and also store the structured analysis in the JSON report.
 
 Convert a file to OBJ in a separate output directory:
 
@@ -87,3 +95,5 @@ python3 scripts/convert_catpart.py /path/to/part.CATPart
 - Add this folder to your Codex local plugin path or marketplace as needed.
 - If no backend is installed, the script exits with a clear setup message instead of failing silently.
 - For multi-file use, pass multiple input files and an `--output-dir`.
+- The plugin still does not natively decode proprietary `CATPart` internals; engineering data is derived from the converted exchange file.
+- For `STEP`, the bounding box is inferred from `CARTESIAN_POINT` records, so it is useful but should not be treated as a certified metrology result.
