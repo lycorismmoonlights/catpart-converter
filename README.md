@@ -11,6 +11,7 @@ The plugin itself does not reverse-engineer CATPart directly. Instead, it wraps 
 After conversion, the script now inspects supported outputs automatically:
 
 - `STEP`: product names, schema, unit, topology counts, and when `FreeCAD` is available, exact B-Rep volume, area, center of gravity, and bounding box
+- `BREP`: when `FreeCAD` is available, exact B-Rep volume, area, center of gravity, topology counts, and bounding box
 - `OBJ`: vertex count, polygon face count, triangle count, area, watertight volume, centroids, object/material names, exact bounding box
 - `STL`: triangle count, encoding type, area, watertight volume, centroids, exact bounding box
 
@@ -32,7 +33,7 @@ Probe whether a backend is configured:
 python3 scripts/convert_catpart.py --probe
 ```
 
-If `freecadcmd` is available locally, `--probe` will also report that exact `STEP` geometry analysis is enabled.
+If `freecadcmd` is available locally, `--probe` will also report that exact `STEP` and `BREP` geometry analysis is enabled.
 
 Convert a file to STEP:
 
@@ -92,6 +93,9 @@ You can configure the backend with environment variables:
 - `CATPART_FREECAD_CMD`
   Optional absolute path to `freecadcmd` or `FreeCADCmd` for exact `STEP` geometry analysis.
 
+- `CATPART_FREECAD_TIMEOUT_SECONDS`
+  Optional timeout for `FreeCAD` exact geometry analysis. Defaults to `45` seconds.
+
 Example:
 
 ```bash
@@ -115,4 +119,6 @@ python3 scripts/convert_catpart.py /path/to/part.CATPart
 - The plugin still does not natively decode proprietary `CATPart` internals; engineering data is derived from the converted exchange file.
 - For `STEP`, product metadata still comes from the STEP text itself. If `FreeCAD` is unavailable, the bounding box remains a `CARTESIAN_POINT` inference rather than a certified metrology result.
 - When `FreeCAD` is available, `STEP` reports include exact imported B-Rep area, enclosed volume, center of gravity, and a non-inferred bounding box.
+- Existing `BREP` files can now be analyzed directly with `--analysis-only`, and `--assume-unit` can be used to attach a unit label when the source format does not expose one clearly.
 - For `OBJ/STL`, surface area is exact for the mesh. Volume and volume centroid are only reported when the mesh appears watertight and orientation-consistent.
+- Invalid `OBJ` faces are skipped and counted instead of crashing the entire analysis run.

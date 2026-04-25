@@ -34,7 +34,7 @@ FORMAT_EXTENSIONS = {
     "gltf": ".gltf",
     "glb": ".glb",
 }
-ANALYSIS_FORMATS = {"step", "stp", "obj", "stl"}
+ANALYSIS_FORMATS = {"step", "stp", "obj", "stl", "brep", "brp"}
 
 CAD_EXCHANGER_EXECUTABLES = [
     "ExchangerConv",
@@ -67,7 +67,9 @@ FREECAD_GLOB_PATTERNS = [
     str(Path.home() / "micromamba/envs/*/bin/FreeCADCmd"),
 ]
 FREECAD_JSON_PREFIX = "JSON_RESULT="
+FREECAD_INPUT_ENV_NAMES = ("CATPART_EXACT_GEOMETRY_INPUT", "CATPART_STEP_INPUT")
 FREECAD_MEASURE_SCRIPT = Path(__file__).with_name("freecad_measure_step.py")
+DEFAULT_FREECAD_TIMEOUT_SECONDS = 45.0
 LENGTH_UNIT_TO_MM = {
     "um": 0.001,
     "mm": 1.0,
@@ -75,6 +77,46 @@ LENGTH_UNIT_TO_MM = {
     "dm": 100.0,
     "m": 1000.0,
     "km": 1000000.0,
+    "in": 25.4,
+    "inch": 25.4,
+    "inches": 25.4,
+    "ft": 304.8,
+    "foot": 304.8,
+    "feet": 304.8,
+    "yd": 914.4,
+    "yard": 914.4,
+    "yards": 914.4,
+    "mi": 1609344.0,
+    "mile": 1609344.0,
+    "miles": 1609344.0,
+    "mil": 0.0254,
+    "thou": 0.0254,
+}
+LENGTH_UNIT_ALIASES = {
+    "micron": "um",
+    "microns": "um",
+    "millimeter": "mm",
+    "millimeters": "mm",
+    "millimetre": "mm",
+    "millimetres": "mm",
+    "centimeter": "cm",
+    "centimeters": "cm",
+    "centimetre": "cm",
+    "centimetres": "cm",
+    "decimeter": "dm",
+    "decimeters": "dm",
+    "decimetre": "dm",
+    "decimetres": "dm",
+    "meter": "m",
+    "meters": "m",
+    "metre": "m",
+    "metres": "m",
+    "kilometer": "km",
+    "kilometers": "km",
+    "kilometre": "km",
+    "kilometres": "km",
+    "inchs": "inch",
+    "foots": "foot",
 }
 
 CAD_EXCHANGER_TEMPLATE = '"{executable}" -i "{input}" -e "{output}"'
@@ -120,6 +162,10 @@ class BackendSpec:
 
 
 class BackendNotFoundError(RuntimeError):
+    pass
+
+
+class InvalidMeshFaceError(ValueError):
     pass
 
 
@@ -219,6 +265,15 @@ def round_number(value: float, digits: int = 6) -> float:
     return round(float(value), digits)
 
 
+def normalize_length_unit_label(unit: str | None) -> str | None:
+    if unit is None:
+        return None
+    normalized = unit.strip().lower()
+    if not normalized:
+        return None
+    return LENGTH_UNIT_ALIASES.get(normalized, normalized)
+
+
 def close_enough(
     left: float,
     right: float,
@@ -262,10 +317,12 @@ def finalize_bbox(
     minimum = [round_number(value) for value in bbox["min"]]
     maximum = [round_number(value) for value in bbox["max"]]
     size = [round_number(maximum[index] - minimum[index]) for index in range(3)]
+    diagonal = round_number(math.sqrt(size[0] ** 2 + size[1] ** 2 + size[2] ** 2))
     return {
         "min": minimum,
         "max": maximum,
         "size": size,
+        "diagonal": diagonal,
         "unit": unit,
         "inferred": inferred,
     }
@@ -276,6 +333,7 @@ def scale_bbox_payload(
     *,
     scale: float,
     unit: str | None,
+    inferred: bool | None = None,
 ) -> dict[str, Any] | None:
     if not bbox:
         return None
@@ -288,7 +346,7 @@ def scale_bbox_payload(
     if "diagonal" in bbox and bbox["diagonal"] is not None:
         scaled["diagonal"] = round_number(bbox["diagonal"] * scale)
     scaled["unit"] = unit
-    scaled["inferred"] = False
+    scaled["inferred"] = bbox.get("inferred", False) if inferred is None else inferred
     return scaled
 
 
@@ -296,6 +354,17 @@ def scale_point_payload(point: list[float] | None, scale: float) -> list[float] 
     if point is None:
         return None
     return [round_number(value * scale) for value in point]
+
+
+def freecad_timeout_seconds() -> float:
+    raw_value = os.environ.get("CATPART_FREECAD_TIMEOUT_SECONDS")
+    if raw_value is None:
+        return DEFAULT_FREECAD_TIMEOUT_SECONDS
+    try:
+        parsed = float(raw_value)
+    except ValueError:
+        return DEFAULT_FREECAD_TIMEOUT_SECONDS
+    return parsed if parsed > 0 else DEFAULT_FREECAD_TIMEOUT_SECONDS
 
 
 def parse_float_triplet(raw_values: str) -> tuple[float, float, float] | None:
@@ -351,8 +420,15 @@ def polygon_face_vertex_indices(face_tokens: list[str], vertex_count: int) -> li
         vertex_ref = token.split("/")[0]
         if not vertex_ref:
             continue
-        raw_index = int(vertex_ref)
+        try:
+            raw_index = int(vertex_ref)
+        except ValueError as exc:
+            raise InvalidMeshFaceError(f"invalid vertex reference: {token}") from exc
         resolved_index = raw_index - 1 if raw_index > 0 else vertex_count + raw_index
+        if resolved_index < 0 or resolved_index >= vertex_count:
+            raise InvalidMeshFaceError(
+                f"vertex reference {raw_index} is out of range for {vertex_count} vertices"
+            )
         indices.append(resolved_index)
     return indices
 
@@ -433,7 +509,7 @@ def classify_length_unit(step_text: str) -> str | None:
 
     conversion_match = STEP_CONVERSION_UNIT_RE.search(step_text)
     if conversion_match:
-        return conversion_match.group(1)
+        return normalize_length_unit_label(conversion_match.group(1))
 
     return None
 
@@ -445,14 +521,11 @@ def step_bbox_in_mm(
     if not bbox or not unit:
         return None
 
-    scale_to_mm = LENGTH_UNIT_TO_MM.get(unit.lower())
+    scale_to_mm = LENGTH_UNIT_TO_MM.get(normalize_length_unit_label(unit) or "")
     if scale_to_mm is None:
         return None
 
-    return {
-        key: [round_number(value * scale_to_mm) for value in bbox[key]]
-        for key in ("min", "max", "size")
-    }
+    return scale_bbox_payload(bbox, scale=scale_to_mm, unit="mm")
 
 
 def step_records(path: Path) -> list[str]:
@@ -623,7 +696,7 @@ def infer_step_exact_unit_resolution(
     if not resolution["comparison_consistent"]:
         return resolution
 
-    scale_to_mm = LENGTH_UNIT_TO_MM.get(textual_unit.lower()) if textual_unit else None
+    scale_to_mm = LENGTH_UNIT_TO_MM.get(normalize_length_unit_label(textual_unit) or "")
     if close_enough(average_ratio, 1.0):
         resolution["exact_length_unit"] = textual_unit
         resolution["exact_to_native_length_scale"] = 1.0
@@ -639,23 +712,30 @@ def infer_step_exact_unit_resolution(
     return resolution
 
 
-def run_freecad_exact_step_analysis(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+def run_freecad_exact_shape_analysis(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     discovered = discover_freecad_executable()
     if discovered is None:
-        raise BackendNotFoundError("No FreeCAD command backend was found for exact STEP analysis.")
+        raise BackendNotFoundError("No FreeCAD command backend was found for exact geometry analysis.")
 
     if not FREECAD_MEASURE_SCRIPT.exists():
         raise FileNotFoundError(f"FreeCAD helper script is missing: {FREECAD_MEASURE_SCRIPT}")
 
     executable, detected_via = discovered
     environment = os.environ.copy()
-    environment["CATPART_STEP_INPUT"] = str(path)
-    completed = subprocess.run(
-        [executable, str(FREECAD_MEASURE_SCRIPT)],
-        capture_output=True,
-        env=environment,
-        text=True,
-    )
+    environment[FREECAD_INPUT_ENV_NAMES[0]] = str(path)
+    timeout_seconds = freecad_timeout_seconds()
+    try:
+        completed = subprocess.run(
+            [executable, str(FREECAD_MEASURE_SCRIPT)],
+            capture_output=True,
+            env=environment,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"FreeCAD analysis timed out after {round_number(timeout_seconds, 3)} seconds."
+        ) from exc
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "FreeCAD analysis failed").strip()
         raise RuntimeError(detail)
@@ -664,6 +744,34 @@ def run_freecad_exact_step_analysis(path: Path) -> tuple[dict[str, Any], dict[st
         "path": executable,
         "detected_via": detected_via,
         "helper_script": str(FREECAD_MEASURE_SCRIPT),
+        "timeout_seconds": round_number(timeout_seconds, 3),
+    }
+
+
+def build_exact_geometry_metadata(
+    exact_geometry: dict[str, Any],
+    backend_details: dict[str, Any],
+    *,
+    unit_resolution: dict[str, Any] | None = None,
+    bbox_import_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    exact_bbox_import = exact_geometry.get("bbox")
+    return {
+        "backend": "freecadcmd",
+        "backend_path": backend_details["path"],
+        "backend_detected_via": backend_details["detected_via"],
+        "helper_script": backend_details["helper_script"],
+        "timeout_seconds": backend_details["timeout_seconds"],
+        "shape_type": exact_geometry.get("shape_type"),
+        "is_null": exact_geometry.get("is_null"),
+        "is_valid": exact_geometry.get("is_valid"),
+        "unit_resolution": unit_resolution,
+        "bbox_import_units": bbox_import_payload,
+        "surface_area_import_units": round_number(exact_geometry.get("surface_area", 0.0)),
+        "volume_import_units": round_number(exact_geometry.get("volume", 0.0)),
+        "center_of_gravity_import_units": exact_geometry.get("center_of_gravity"),
+        "bbox_diagonal_import_units": exact_bbox_import.get("diagonal") if exact_bbox_import else None,
+        "topology": exact_geometry.get("topology"),
     }
 
 
@@ -673,7 +781,8 @@ def merge_step_analyses(
     backend_details: dict[str, Any],
 ) -> dict[str, Any]:
     analysis = dict(textual_analysis)
-    native_length_unit = analysis.get("length_unit")
+    native_length_unit = normalize_length_unit_label(analysis.get("length_unit"))
+    analysis["length_unit"] = native_length_unit
     exact_bbox_import = exact_geometry.get("bbox")
     unit_resolution = infer_step_exact_unit_resolution(
         analysis.get("bbox_native_units"),
@@ -734,35 +843,32 @@ def merge_step_analyses(
     analysis["volume_unit"] = volume_unit
     analysis["center_of_gravity"] = center_payload
     analysis["center_of_gravity_unit"] = center_unit
-    analysis["topology_exact"] = exact_geometry.get("topology")
+    exact_topology = exact_geometry.get("topology") or {}
+    textual_topology = dict(analysis.get("topology") or {})
+    analysis["topology_from_step_entities"] = textual_topology
+    analysis["topology_exact"] = exact_topology
+    analysis["topology"] = {
+        **textual_topology,
+        **exact_topology,
+    }
     analysis["bbox_from_cartesian_points"] = analysis.get("bbox_native_units")
     if bbox_native_payload is not None:
         analysis["bbox_native_units"] = bbox_native_payload
     if bbox_mm_payload is not None:
         analysis["bbox_mm"] = bbox_mm_payload
-    analysis["exact_geometry"] = {
-        "backend": "freecadcmd",
-        "backend_path": backend_details["path"],
-        "backend_detected_via": backend_details["detected_via"],
-        "helper_script": backend_details["helper_script"],
-        "shape_type": exact_geometry.get("shape_type"),
-        "is_null": exact_geometry.get("is_null"),
-        "is_valid": exact_geometry.get("is_valid"),
-        "unit_resolution": unit_resolution,
-        "bbox_import_units": bbox_import_payload,
-        "surface_area_import_units": surface_area_import,
-        "volume_import_units": enclosed_volume_import,
-        "center_of_gravity_import_units": center_import,
-        "bbox_diagonal_import_units": exact_bbox_import.get("diagonal") if exact_bbox_import else None,
-        "topology": exact_geometry.get("topology"),
-    }
+    analysis["exact_geometry"] = build_exact_geometry_metadata(
+        exact_geometry,
+        backend_details,
+        unit_resolution=unit_resolution,
+        bbox_import_payload=bbox_import_payload,
+    )
     return analysis
 
 
 def analyze_step_file(path: Path) -> dict[str, Any]:
     textual_analysis = analyze_step_textual_file(path)
     try:
-        exact_geometry, backend_details = run_freecad_exact_step_analysis(path)
+        exact_geometry, backend_details = run_freecad_exact_shape_analysis(path)
     except (BackendNotFoundError, FileNotFoundError):
         return textual_analysis
     except Exception as exc:  # pragma: no cover - defensive reporting
@@ -770,6 +876,52 @@ def analyze_step_file(path: Path) -> dict[str, Any]:
         return textual_analysis
 
     return merge_step_analyses(textual_analysis, exact_geometry, backend_details)
+
+
+def analyze_exact_shape_file(
+    path: Path,
+    *,
+    kind: str,
+    unit: str | None = None,
+) -> dict[str, Any]:
+    exact_geometry, backend_details = run_freecad_exact_shape_analysis(path)
+    normalized_unit = normalize_length_unit_label(unit)
+    bbox_import = exact_geometry.get("bbox")
+    bbox_payload = None
+    if bbox_import:
+        bbox_payload = dict(bbox_import)
+        bbox_payload["unit"] = normalized_unit
+        bbox_payload["inferred"] = False
+
+    precision_note = (
+        "Measured from the imported B-Rep using FreeCAD."
+        if normalized_unit
+        else "Measured from the imported B-Rep using FreeCAD. Length-derived values are "
+        "reported in the model's native units because this format does not expose a "
+        "standardized unit label here."
+    )
+    return {
+        "kind": kind,
+        "read_strategy": "freecad_exact_geometry",
+        "native_catpart_read": False,
+        "precision_note": precision_note,
+        "length_unit": normalized_unit,
+        "assumed_unit": normalized_unit,
+        "surface_area": round_number(exact_geometry.get("surface_area", 0.0)),
+        "surface_area_unit": format_power_unit(normalized_unit, 2),
+        "enclosed_volume": round_number(exact_geometry.get("volume", 0.0)),
+        "volume_unit": format_power_unit(normalized_unit, 3),
+        "center_of_gravity": exact_geometry.get("center_of_gravity"),
+        "center_of_gravity_unit": normalized_unit,
+        "bbox_native_units": bbox_payload,
+        "topology": exact_geometry.get("topology") or {},
+        "exact_geometry": build_exact_geometry_metadata(
+            exact_geometry,
+            backend_details,
+            unit_resolution=None,
+            bbox_import_payload=bbox_payload,
+        ),
+    }
 
 
 def analyze_triangle_mesh(
@@ -897,6 +1049,8 @@ def analyze_obj_file(path: Path, unit: str | None = None) -> dict[str, Any]:
     vertices: list[tuple[float, float, float]] = []
     triangles: list[tuple[int, int, int]] = []
     face_count = 0
+    invalid_face_count = 0
+    invalid_face_examples: list[str] = []
     objects: list[str] = []
     materials: list[str] = []
 
@@ -919,7 +1073,13 @@ def analyze_obj_file(path: Path, unit: str | None = None) -> dict[str, Any]:
 
             if OBJ_FACE_RE.match(line):
                 face_count += 1
-                face_indices = polygon_face_vertex_indices(line.split()[1:], len(vertices))
+                try:
+                    face_indices = polygon_face_vertex_indices(line.split()[1:], len(vertices))
+                except InvalidMeshFaceError as exc:
+                    invalid_face_count += 1
+                    if len(invalid_face_examples) < 5:
+                        invalid_face_examples.append(str(exc))
+                    continue
                 triangles.extend(triangulate_face(face_indices))
                 continue
 
@@ -942,9 +1102,12 @@ def analyze_obj_file(path: Path, unit: str | None = None) -> dict[str, Any]:
         kind="obj",
         unit=unit,
         extra_fields={
-        "face_count": face_count,
-        "objects": objects,
-        "materials": materials,
+            "face_count": face_count,
+            "valid_face_count": face_count - invalid_face_count,
+            "invalid_face_count": invalid_face_count,
+            "invalid_face_examples": invalid_face_examples,
+            "objects": objects,
+            "materials": materials,
         },
     )
 
@@ -1046,6 +1209,8 @@ def analyze_output_file(path: Path, output_format: str, assume_unit: str | None 
     normalized = output_format.lower()
     if normalized in {"step", "stp"}:
         return analyze_step_file(path)
+    if normalized in {"brep", "brp"}:
+        return analyze_exact_shape_file(path, kind="brep", unit=assume_unit)
     if normalized == "obj":
         return analyze_obj_file(path, unit=assume_unit)
     if normalized == "stl":
@@ -1125,6 +1290,22 @@ def format_console_summary(analysis: dict[str, Any]) -> str:
             f"{area_text}; {volume_text}; watertight={analysis.get('watertight')}; {bbox_text}"
         )
 
+    if kind == "brep":
+        bbox = analysis.get("bbox_native_units")
+        bbox_text = "bbox unavailable"
+        if bbox:
+            bbox_text = f"bbox={bbox.get('size')} {bbox.get('unit') or 'native'}".strip()
+        area = analysis.get("surface_area")
+        volume = analysis.get("enclosed_volume")
+        area_text = f"area={area} {analysis.get('surface_area_unit') or ''}".strip()
+        volume_text = f"volume={volume} {analysis.get('volume_unit') or ''}".strip()
+        topology = analysis.get("topology") or {}
+        return (
+            f"BREP analysis: solids={topology.get('solids', 0)}; "
+            f"faces={topology.get('faces', 0)}; edges={topology.get('edges', 0)}; "
+            f"vertices={topology.get('vertices', 0)}; {area_text}; {volume_text}; {bbox_text}"
+        )
+
     return "Analysis available"
 
 
@@ -1139,6 +1320,9 @@ def discover_exact_geometry_backend() -> dict[str, Any]:
         "exact_step_geometry_with_freecad": bool(
             discovered_freecad is not None and FREECAD_MEASURE_SCRIPT.exists()
         ),
+        "exact_brep_geometry_with_freecad": bool(
+            discovered_freecad is not None and FREECAD_MEASURE_SCRIPT.exists()
+        ),
         "freecad_cmd": {
             "available": discovered_freecad is not None,
             "path": discovered_freecad[0] if discovered_freecad else None,
@@ -1148,6 +1332,7 @@ def discover_exact_geometry_backend() -> dict[str, Any]:
             "available": FREECAD_MEASURE_SCRIPT.exists(),
             "path": str(FREECAD_MEASURE_SCRIPT),
         },
+        "freecad_timeout_seconds": round_number(freecad_timeout_seconds(), 3),
     }
 
 
@@ -1176,6 +1361,9 @@ def probe_environment(args: argparse.Namespace) -> dict[str, Any]:
             "textual_step_analysis": True,
             "exact_step_geometry_with_freecad": exact_geometry_backend[
                 "exact_step_geometry_with_freecad"
+            ],
+            "exact_brep_geometry_with_freecad": exact_geometry_backend[
+                "exact_brep_geometry_with_freecad"
             ],
             "polyhedral_obj_analysis": True,
             "polyhedral_stl_analysis": True,
@@ -1267,6 +1455,10 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
 
 
 def render_command(backend: BackendSpec, input_path: Path, output_path: Path, output_format: str) -> list[str]:
+    if "{executable}" in backend.template and not backend.executable:
+        raise ValueError(
+            "The selected backend template requires {executable}, but no executable path was provided."
+        )
     values = {
         "executable": backend.executable,
         "input": str(input_path),
@@ -1336,7 +1528,13 @@ def convert_one(
     assume_unit: str | None,
 ) -> dict[str, Any]:
     started_at = time.time()
+    source_sha256 = sha256_of(input_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if input_path == output_path:
+        raise FileExistsError(
+            f"Output path resolves to the source file: {output_path}. Choose a different output path."
+        )
 
     if output_path.exists() and not overwrite:
         raise FileExistsError(
@@ -1355,7 +1553,7 @@ def convert_one(
         "command": command,
         "status": "dry_run" if dry_run else "pending",
         "started_at_epoch": started_at,
-        "source_sha256": sha256_of(input_path),
+        "source_sha256": source_sha256,
     }
 
     if dry_run:
@@ -1438,12 +1636,13 @@ def main() -> int:
         for input_path in inputs:
             try:
                 result = analyze_existing_file(input_path, assume_unit=args.assume_unit)
-            except ValueError as exc:
+            except Exception as exc:
                 failures += 1
                 result = {
                     "source": str(input_path),
                     "status": "failed",
                     "error": str(exc),
+                    "error_type": type(exc).__name__,
                 }
                 print(f"[FAILED] {input_path.name}: {exc}", file=sys.stderr)
             else:
@@ -1493,7 +1692,7 @@ def main() -> int:
                 analyze=not args.skip_analysis,
                 assume_unit=args.assume_unit,
             )
-        except FileExistsError as exc:
+        except (FileExistsError, ValueError) as exc:
             result = {
                 "source": str(input_path),
                 "output": str(output_path),
@@ -1502,6 +1701,7 @@ def main() -> int:
                 "backend_detected_via": backend.detected_via,
                 "status": "failed",
                 "error": str(exc),
+                "error_type": type(exc).__name__,
             }
 
         results.append(result)

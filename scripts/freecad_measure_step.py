@@ -9,6 +9,8 @@ from pathlib import Path
 
 import Part
 
+INPUT_ENV_NAMES = ("CATPART_EXACT_GEOMETRY_INPUT", "CATPART_STEP_INPUT")
+
 
 def round_number(value: float, digits: int = 9) -> float:
     return round(float(value), digits)
@@ -52,10 +54,16 @@ def point_payload(point: object | None) -> list[float] | None:
 
 
 def main() -> int:
-    raw_input = os.environ.get("CATPART_STEP_INPUT") or (sys.argv[1] if len(sys.argv) == 2 else None)
+    raw_input = None
+    for env_name in INPUT_ENV_NAMES:
+        raw_input = os.environ.get(env_name)
+        if raw_input:
+            break
+    if raw_input is None and len(sys.argv) == 2:
+        raw_input = sys.argv[1]
     if raw_input is None:
         print(
-            "Usage: freecad_measure_step.py <path/to/model.step> or set CATPART_STEP_INPUT",
+            "Usage: freecad_measure_step.py <path/to/model.step> or set CATPART_EXACT_GEOMETRY_INPUT",
             file=sys.stderr,
         )
         return 2
