@@ -20,6 +20,41 @@ spec.loader.exec_module(convert_catpart)
 
 
 class ConvertCatpartTests(unittest.TestCase):
+    def export_box_with_freecad(self, temp_path: Path, output_name: str, export_lines: list[str]) -> Path:
+        discovered = convert_catpart.discover_freecad_executable()
+        if discovered is None:
+            self.skipTest("FreeCAD exact geometry backend is not available")
+
+        freecad_cmd, _ = discovered
+        output_path = temp_path / output_name
+        script_path = temp_path / "make_box.py"
+        script_path.write_text(
+            "\n".join(
+                [
+                    "import os",
+                    "import FreeCAD as App",
+                    "import Part",
+                    "",
+                    f"output_path = os.path.join(os.path.dirname(__file__), '{output_name}')",
+                    "doc = App.newDocument('MakeBox')",
+                    "box = doc.addObject('Part::Box', 'Box')",
+                    "box.Length = 10",
+                    "box.Width = 20",
+                    "box.Height = 30",
+                    "doc.recompute()",
+                    *export_lines,
+                ]
+            ),
+            encoding="utf-8",
+        )
+        subprocess.run(
+            [freecad_cmd, str(script_path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return output_path
+
     def test_classify_length_unit_normalizes_conversion_based_inches(self) -> None:
         step_text = "CONVERSION_BASED_UNIT('INCH',#42);"
         self.assertEqual(convert_catpart.classify_length_unit(step_text), "inch")
@@ -79,38 +114,12 @@ class ConvertCatpartTests(unittest.TestCase):
             self.assertTrue(input_path.exists())
 
     def test_analyze_brep_file_with_freecad_when_available(self) -> None:
-        discovered = convert_catpart.discover_freecad_executable()
-        if discovered is None:
-            self.skipTest("FreeCAD exact geometry backend is not available")
-
-        freecad_cmd, _ = discovered
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            script_path = temp_path / "make_brep.py"
-            brep_path = temp_path / "box.brep"
-            script_path.write_text(
-                "\n".join(
-                    [
-                        "import os",
-                        "import FreeCAD as App",
-                        "",
-                        "brep_path = os.path.join(os.path.dirname(__file__), 'box.brep')",
-                        "doc = App.newDocument('MakeBox')",
-                        "box = doc.addObject('Part::Box', 'Box')",
-                        "box.Length = 10",
-                        "box.Width = 20",
-                        "box.Height = 30",
-                        "doc.recompute()",
-                        "box.Shape.exportBrep(brep_path)",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-            subprocess.run(
-                [freecad_cmd, str(script_path)],
-                check=True,
-                capture_output=True,
-                text=True,
+            brep_path = self.export_box_with_freecad(
+                temp_path,
+                "box.brep",
+                ["box.Shape.exportBrep(output_path)"],
             )
 
             analysis = convert_catpart.analyze_output_file(
@@ -124,6 +133,33 @@ class ConvertCatpartTests(unittest.TestCase):
         self.assertEqual(analysis["surface_area"], 2200.0)
         self.assertEqual(analysis["enclosed_volume"], 6000.0)
         self.assertEqual(analysis["topology"]["faces"], 6)
+        self.assertEqual(analysis["solid_details"]["count"], 1)
+        self.assertEqual(analysis["solid_details"]["items"][0]["volume"], 6000.0)
+        self.assertEqual(analysis["mass_properties"]["mass_import_units"], 6000.0)
+        self.assertTrue(analysis["mass_properties"]["matrix_of_inertia_import_units"])
+
+    def test_analyze_iges_file_with_freecad_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            iges_path = self.export_box_with_freecad(
+                temp_path,
+                "box.igs",
+                ["Part.export([box], output_path)"],
+            )
+
+            analysis = convert_catpart.analyze_output_file(
+                iges_path,
+                "igs",
+                assume_unit="mm",
+            )
+
+        assert analysis is not None
+        self.assertEqual(analysis["kind"], "iges")
+        self.assertEqual(analysis["surface_area"], 2200.0)
+        self.assertEqual(analysis["enclosed_volume"], 6000.0)
+        self.assertEqual(analysis["topology"]["faces"], 6)
+        self.assertEqual(analysis["surface_area_unit"], "mm^2")
+        self.assertEqual(analysis["volume_unit"], "mm^3")
 
 
 if __name__ == "__main__":

@@ -34,7 +34,7 @@ FORMAT_EXTENSIONS = {
     "gltf": ".gltf",
     "glb": ".glb",
 }
-ANALYSIS_FORMATS = {"step", "stp", "obj", "stl", "brep", "brp"}
+ANALYSIS_FORMATS = {"step", "stp", "obj", "stl", "brep", "brp", "iges", "igs"}
 
 CAD_EXCHANGER_EXECUTABLES = [
     "ExchangerConv",
@@ -70,6 +70,7 @@ FREECAD_JSON_PREFIX = "JSON_RESULT="
 FREECAD_INPUT_ENV_NAMES = ("CATPART_EXACT_GEOMETRY_INPUT", "CATPART_STEP_INPUT")
 FREECAD_MEASURE_SCRIPT = Path(__file__).with_name("freecad_measure_step.py")
 DEFAULT_FREECAD_TIMEOUT_SECONDS = 45.0
+DEFAULT_DETAIL_LIMIT = 100
 LENGTH_UNIT_TO_MM = {
     "um": 0.001,
     "mm": 1.0,
@@ -365,6 +366,17 @@ def freecad_timeout_seconds() -> float:
     except ValueError:
         return DEFAULT_FREECAD_TIMEOUT_SECONDS
     return parsed if parsed > 0 else DEFAULT_FREECAD_TIMEOUT_SECONDS
+
+
+def detail_limit() -> int:
+    raw_value = os.environ.get("CATPART_DETAIL_LIMIT")
+    if raw_value is None:
+        return DEFAULT_DETAIL_LIMIT
+    try:
+        parsed = int(raw_value)
+    except ValueError:
+        return DEFAULT_DETAIL_LIMIT
+    return max(0, parsed)
 
 
 def parse_float_triplet(raw_values: str) -> tuple[float, float, float] | None:
@@ -723,6 +735,7 @@ def run_freecad_exact_shape_analysis(path: Path) -> tuple[dict[str, Any], dict[s
     executable, detected_via = discovered
     environment = os.environ.copy()
     environment[FREECAD_INPUT_ENV_NAMES[0]] = str(path)
+    environment["CATPART_DETAIL_LIMIT"] = str(detail_limit())
     timeout_seconds = freecad_timeout_seconds()
     try:
         completed = subprocess.run(
@@ -745,6 +758,7 @@ def run_freecad_exact_shape_analysis(path: Path) -> tuple[dict[str, Any], dict[s
         "detected_via": detected_via,
         "helper_script": str(FREECAD_MEASURE_SCRIPT),
         "timeout_seconds": round_number(timeout_seconds, 3),
+        "detail_limit": detail_limit(),
     }
 
 
@@ -762,16 +776,25 @@ def build_exact_geometry_metadata(
         "backend_detected_via": backend_details["detected_via"],
         "helper_script": backend_details["helper_script"],
         "timeout_seconds": backend_details["timeout_seconds"],
+        "detail_limit": backend_details["detail_limit"],
         "shape_type": exact_geometry.get("shape_type"),
         "is_null": exact_geometry.get("is_null"),
         "is_valid": exact_geometry.get("is_valid"),
         "unit_resolution": unit_resolution,
+        "mass_import_units": exact_geometry.get("mass"),
+        "freecad_mass_import_units": exact_geometry.get("freecad_mass"),
         "bbox_import_units": bbox_import_payload,
         "surface_area_import_units": round_number(exact_geometry.get("surface_area", 0.0)),
         "volume_import_units": round_number(exact_geometry.get("volume", 0.0)),
+        "center_of_mass_import_units": exact_geometry.get("center_of_mass"),
         "center_of_gravity_import_units": exact_geometry.get("center_of_gravity"),
         "bbox_diagonal_import_units": exact_bbox_import.get("diagonal") if exact_bbox_import else None,
+        "static_moments_import_units": exact_geometry.get("static_moments"),
+        "matrix_of_inertia_import_units": exact_geometry.get("matrix_of_inertia"),
+        "principal_properties_import_units": exact_geometry.get("principal_properties"),
         "topology": exact_geometry.get("topology"),
+        "solid_details": exact_geometry.get("solid_details"),
+        "shell_details": exact_geometry.get("shell_details"),
     }
 
 
@@ -801,7 +824,7 @@ def merge_step_analyses(
     scale_to_mm = unit_resolution.get("exact_to_mm_length_scale")
     surface_area_import = round_number(exact_geometry.get("surface_area", 0.0))
     enclosed_volume_import = round_number(exact_geometry.get("volume", 0.0))
-    center_import = exact_geometry.get("center_of_gravity")
+    center_import = exact_geometry.get("center_of_mass") or exact_geometry.get("center_of_gravity")
 
     surface_area_value = surface_area_import
     surface_area_unit = format_power_unit(exact_length_unit, 2)
@@ -841,6 +864,8 @@ def merge_step_analyses(
     analysis["surface_area_unit"] = surface_area_unit
     analysis["enclosed_volume"] = enclosed_volume_value
     analysis["volume_unit"] = volume_unit
+    analysis["center_of_mass"] = center_payload
+    analysis["center_of_mass_unit"] = center_unit
     analysis["center_of_gravity"] = center_payload
     analysis["center_of_gravity_unit"] = center_unit
     exact_topology = exact_geometry.get("topology") or {}
@@ -856,6 +881,19 @@ def merge_step_analyses(
         analysis["bbox_native_units"] = bbox_native_payload
     if bbox_mm_payload is not None:
         analysis["bbox_mm"] = bbox_mm_payload
+    analysis["mass_properties"] = {
+        "mass_import_units": exact_geometry.get("mass"),
+        "freecad_mass_import_units": exact_geometry.get("freecad_mass"),
+        "static_moments_import_units": exact_geometry.get("static_moments"),
+        "matrix_of_inertia_import_units": exact_geometry.get("matrix_of_inertia"),
+        "principal_properties_import_units": exact_geometry.get("principal_properties"),
+        "units_note": (
+            "FreeCAD mass-property values are reported in imported model units. "
+            "For solids with unit density, mass is numerically equal to enclosed volume."
+        ),
+    }
+    analysis["solid_details"] = exact_geometry.get("solid_details")
+    analysis["shell_details"] = exact_geometry.get("shell_details")
     analysis["exact_geometry"] = build_exact_geometry_metadata(
         exact_geometry,
         backend_details,
@@ -911,10 +949,25 @@ def analyze_exact_shape_file(
         "surface_area_unit": format_power_unit(normalized_unit, 2),
         "enclosed_volume": round_number(exact_geometry.get("volume", 0.0)),
         "volume_unit": format_power_unit(normalized_unit, 3),
-        "center_of_gravity": exact_geometry.get("center_of_gravity"),
+        "center_of_mass": exact_geometry.get("center_of_mass") or exact_geometry.get("center_of_gravity"),
+        "center_of_mass_unit": normalized_unit,
+        "center_of_gravity": exact_geometry.get("center_of_mass") or exact_geometry.get("center_of_gravity"),
         "center_of_gravity_unit": normalized_unit,
         "bbox_native_units": bbox_payload,
         "topology": exact_geometry.get("topology") or {},
+        "mass_properties": {
+            "mass_import_units": exact_geometry.get("mass"),
+            "freecad_mass_import_units": exact_geometry.get("freecad_mass"),
+            "static_moments_import_units": exact_geometry.get("static_moments"),
+            "matrix_of_inertia_import_units": exact_geometry.get("matrix_of_inertia"),
+            "principal_properties_import_units": exact_geometry.get("principal_properties"),
+            "units_note": (
+                "FreeCAD mass-property values are reported in imported model units. "
+                "For solids with unit density, mass is numerically equal to enclosed volume."
+            ),
+        },
+        "solid_details": exact_geometry.get("solid_details"),
+        "shell_details": exact_geometry.get("shell_details"),
         "exact_geometry": build_exact_geometry_metadata(
             exact_geometry,
             backend_details,
@@ -1211,6 +1264,8 @@ def analyze_output_file(path: Path, output_format: str, assume_unit: str | None 
         return analyze_step_file(path)
     if normalized in {"brep", "brp"}:
         return analyze_exact_shape_file(path, kind="brep", unit=assume_unit)
+    if normalized in {"iges", "igs"}:
+        return analyze_exact_shape_file(path, kind="iges", unit=assume_unit)
     if normalized == "obj":
         return analyze_obj_file(path, unit=assume_unit)
     if normalized == "stl":
@@ -1290,7 +1345,7 @@ def format_console_summary(analysis: dict[str, Any]) -> str:
             f"{area_text}; {volume_text}; watertight={analysis.get('watertight')}; {bbox_text}"
         )
 
-    if kind == "brep":
+    if kind in {"brep", "iges"}:
         bbox = analysis.get("bbox_native_units")
         bbox_text = "bbox unavailable"
         if bbox:
@@ -1301,7 +1356,7 @@ def format_console_summary(analysis: dict[str, Any]) -> str:
         volume_text = f"volume={volume} {analysis.get('volume_unit') or ''}".strip()
         topology = analysis.get("topology") or {}
         return (
-            f"BREP analysis: solids={topology.get('solids', 0)}; "
+            f"{kind.upper()} analysis: solids={topology.get('solids', 0)}; "
             f"faces={topology.get('faces', 0)}; edges={topology.get('edges', 0)}; "
             f"vertices={topology.get('vertices', 0)}; {area_text}; {volume_text}; {bbox_text}"
         )
@@ -1323,6 +1378,9 @@ def discover_exact_geometry_backend() -> dict[str, Any]:
         "exact_brep_geometry_with_freecad": bool(
             discovered_freecad is not None and FREECAD_MEASURE_SCRIPT.exists()
         ),
+        "exact_iges_geometry_with_freecad": bool(
+            discovered_freecad is not None and FREECAD_MEASURE_SCRIPT.exists()
+        ),
         "freecad_cmd": {
             "available": discovered_freecad is not None,
             "path": discovered_freecad[0] if discovered_freecad else None,
@@ -1333,6 +1391,7 @@ def discover_exact_geometry_backend() -> dict[str, Any]:
             "path": str(FREECAD_MEASURE_SCRIPT),
         },
         "freecad_timeout_seconds": round_number(freecad_timeout_seconds(), 3),
+        "detail_limit": detail_limit(),
     }
 
 
@@ -1364,6 +1423,9 @@ def probe_environment(args: argparse.Namespace) -> dict[str, Any]:
             ],
             "exact_brep_geometry_with_freecad": exact_geometry_backend[
                 "exact_brep_geometry_with_freecad"
+            ],
+            "exact_iges_geometry_with_freecad": exact_geometry_backend[
+                "exact_iges_geometry_with_freecad"
             ],
             "polyhedral_obj_analysis": True,
             "polyhedral_stl_analysis": True,
