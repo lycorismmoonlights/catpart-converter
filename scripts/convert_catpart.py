@@ -622,6 +622,13 @@ def skip_step_string(text: str, start_index: int) -> int:
     return length
 
 
+def skip_step_comment(text: str, start_index: int) -> int:
+    end_index = text.find("*/", start_index + 2)
+    if end_index == -1:
+        return len(text)
+    return end_index + 2
+
+
 def summarize_step_values(text: str) -> dict[str, Any]:
     value_counts: Counter[str] = Counter()
     numeric_summary: dict[str, Any] = {
@@ -654,6 +661,11 @@ def summarize_step_values(text: str) -> dict[str, Any]:
     length = len(text)
     while index < length:
         char = text[index]
+        if char == "/" and index + 1 < length and text[index + 1] == "*":
+            value_counts["comment"] += 1
+            index = skip_step_comment(text, index)
+            continue
+
         if char == "'":
             value_counts["string"] += 1
             index = skip_step_string(text, index)
@@ -2109,7 +2121,7 @@ def main() -> int:
         )
 
         try:
-            if args.backend == "auto" and source_format in FREECAD_CONVERT_INPUT_FORMATS:
+            if can_use_freecad_conversion(source_format, args.format, args.backend):
                 result = convert_one_with_freecad(
                     input_path=input_path,
                     output_path=output_path,

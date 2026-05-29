@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import math
+import os
 import subprocess
 import sys
 import tempfile
@@ -97,6 +98,16 @@ class ConvertCatpartTests(unittest.TestCase):
         self.assertEqual(counts["string"], 1)
         self.assertEqual(counts["entity_reference"], 2)
 
+    def test_summarize_step_values_ignores_numbers_inside_comments(self) -> None:
+        text = "/* bogus 9999 -7 3.14 .T. #42 */ #1=EXAMPLE(2);"
+
+        summary = convert_catpart.summarize_step_values(text)
+
+        self.assertEqual(summary["value_type_counts"]["comment"], 1)
+        self.assertEqual(summary["numeric"]["total_count"], 1)
+        self.assertEqual(summary["numeric"]["min"], 2.0)
+        self.assertEqual(summary["numeric"]["max"], 2.0)
+
     def test_analyze_obj_file_skips_invalid_faces_instead_of_crashing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             obj_path = Path(temp_dir) / "bad.obj"
@@ -162,6 +173,39 @@ class ConvertCatpartTests(unittest.TestCase):
         self.assertEqual(result["analysis"]["kind"], "brep")
         self.assertEqual(result["analysis"]["enclosed_volume"], 6000.0)
         self.assertEqual(result["analysis"]["surface_area"], 2200.0)
+
+    def test_auto_backend_falls_back_when_freecad_target_is_unsupported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            step_path = temp_path / "model.step"
+            output_path = temp_path / "model.glb"
+            report_path = temp_path / "report.json"
+            step_path.write_text("ISO-10303-21;\nEND-ISO-10303-21;\n", encoding="utf-8")
+            environment = os.environ.copy()
+            environment["CATPART_CONVERTER_BIN"] = "/bin/cp"
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(MODULE_PATH),
+                    str(step_path),
+                    "--format",
+                    "glb",
+                    "--backend-cmd",
+                    '"{executable}" "{input}" "{output}"',
+                    "--output",
+                    str(output_path),
+                    "--report",
+                    str(report_path),
+                ],
+                check=False,
+                capture_output=True,
+                env=environment,
+                text=True,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertTrue(output_path.exists())
 
     def test_analyze_brep_file_with_freecad_when_available(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
