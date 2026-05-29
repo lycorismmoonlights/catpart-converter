@@ -30,8 +30,10 @@ FORMAT_EXTENSIONS = {
     "iges": ".iges",
     "igs": ".igs",
     "brep": ".brep",
+    "brp": ".brp",
     "x_t": ".x_t",
     "x_b": ".x_b",
+    "sat": ".sat",
     "gltf": ".gltf",
     "glb": ".glb",
 }
@@ -73,6 +75,24 @@ CATIA_CATSTART_PATHS = [
     "/opt/DassaultSystemes/B*/code/command/catstart",
     "/usr/DassaultSystemes/B*/code/command/catstart",
     "C:/Program Files/Dassault Systemes/B*/win_b64/code/bin/catstart.exe",
+]
+DATAKIT_CROSSMANAGER_EXECUTABLES = [
+    "CrossManagerCLI",
+    "CrossManagerCli",
+    "crossmanagercli",
+]
+DATAKIT_CROSSMANAGER_PATHS = [
+    "/Applications/CrossManager*/CrossManagerCLI",
+    "/Applications/Datakit*/CrossManagerCLI",
+    "/opt/datakit/*/CrossManagerCLI",
+    "C:/Program Files/Datakit/CrossManager*/CrossManagerCLI.exe",
+]
+THREED_TOOL_EXECUTABLES = [
+    "Convert.exe",
+]
+THREED_TOOL_PATHS = [
+    "C:/Program Files/3D-Tool V*/Convert.exe",
+    "C:/Program Files (x86)/3D-Tool V*/Convert.exe",
 ]
 FREECAD_EXECUTABLES = [
     "FreeCADCmd",
@@ -153,6 +173,7 @@ LENGTH_UNIT_ALIASES = {
 
 CAD_EXCHANGER_TEMPLATE = '"{executable}" -i "{input}" -e "{output}"'
 CATIA_BATCH_TEMPLATE = '"{executable}" -run "CNEXT -batch -macro {macro}"'
+THREED_TOOL_TEMPLATE = '"{executable}" -i "{input}" -o "{output}"'
 FLOAT_RE = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[Ee][-+]?\d+)?")
 STEP_NUMBER_START_RE = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?")
 STEP_ENTITY_RE = re.compile(r"#\d+\s*=\s*([A-Z0-9_]+)\s*\(")
@@ -235,7 +256,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--backend",
-        choices=("auto", "cadexchanger", "catia", "custom"),
+        choices=("auto", "cadexchanger", "catia", "datakit", "3dtool", "custom"),
         default="auto",
         help="Backend selection strategy (default: auto)",
     )
@@ -271,12 +292,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-analysis",
         action="store_true",
-        help="Skip post-conversion engineering analysis of STEP/OBJ/STL outputs.",
+        help="Skip post-conversion engineering analysis of supported outputs.",
     )
     parser.add_argument(
         "--analysis-only",
         action="store_true",
-        help="Analyze existing STEP/OBJ/STL files without running a CATPart conversion backend.",
+        help="Analyze existing STEP/BREP/IGES/OBJ/STL files without running a CATPart conversion backend.",
     )
     parser.add_argument(
         "--assume-unit",
@@ -1716,12 +1737,105 @@ def discover_catia_batch_backend() -> dict[str, Any]:
     }
 
 
+def discover_datakit_crossmanager_backend() -> dict[str, Any]:
+    env_executable = os.environ.get("CATPART_DATKIT_BIN")
+    env_template = os.environ.get("CATPART_DATKIT_TEMPLATE")
+    discovered: tuple[str, str] | None = None
+    if env_executable:
+        discovered = (normalize_path(env_executable), "ENV:CATPART_DATKIT_BIN")
+    else:
+        discovered = discover_executable(DATAKIT_CROSSMANAGER_EXECUTABLES, DATAKIT_CROSSMANAGER_PATHS)
+
+    return {
+        "available": discovered is not None and bool(env_template),
+        "detected_executable": discovered is not None,
+        "name": "datakit_crossmanager_cli",
+        "executable": discovered[0] if discovered else None,
+        "detected_via": discovered[1] if discovered else None,
+        "template": env_template,
+        "template_required": True,
+        "supported_output_formats": [
+            "brep",
+            "glb",
+            "gltf",
+            "iges",
+            "igs",
+            "obj",
+            "sat",
+            "step",
+            "stl",
+            "stp",
+            "x_b",
+            "x_t",
+        ],
+        "native_properties": [
+            "vendor metadata when exposed by backend reports",
+        ],
+        "requires": [
+            "Datakit CrossManager CLI license",
+            "CATIA V5 input module",
+            "STEP output module",
+            "CATPART_DATKIT_TEMPLATE because public docs do not expose a stable CLI syntax",
+        ],
+        "environment": {
+            "CATPART_DATKIT_BIN": env_executable,
+            "CATPART_DATKIT_TEMPLATE": env_template,
+        },
+    }
+
+
+def discover_3dtool_backend() -> dict[str, Any]:
+    env_executable = os.environ.get("CATPART_THREEDTOOL_BIN")
+    discovered: tuple[str, str] | None = None
+    if env_executable:
+        discovered = (normalize_path(env_executable), "ENV:CATPART_THREEDTOOL_BIN")
+    else:
+        discovered = discover_executable(THREED_TOOL_EXECUTABLES, THREED_TOOL_PATHS)
+
+    return {
+        "available": discovered is not None,
+        "name": "3d_tool",
+        "executable": discovered[0] if discovered else None,
+        "detected_via": discovered[1] if discovered else None,
+        "template": THREED_TOOL_TEMPLATE if discovered else None,
+        "supported_output_formats": ["step", "stp", "iges", "igs", "stl", "x_t", "sat"],
+        "native_properties": [],
+        "requires": [
+            "Installed 3D-Tool NativeCAD Converter",
+            "Windows 10/11",
+            "3D-Tool license with CATIA V5 input support",
+        ],
+        "environment": {
+            "CATPART_THREEDTOOL_BIN": env_executable,
+        },
+    }
+
+
+def discover_native_backend_candidates() -> dict[str, Any]:
+    return {
+        "catia_v5_batch": discover_catia_batch_backend(),
+        "datakit_crossmanager_cli": discover_datakit_crossmanager_backend(),
+        "three_d_tool": discover_3dtool_backend(),
+        "cad_exchanger_batch": {
+            "available": discover_executable(CAD_EXCHANGER_EXECUTABLES, CAD_EXCHANGER_PATHS)
+            is not None,
+            "template": CAD_EXCHANGER_TEMPLATE,
+            "supported_output_formats": sorted(FORMAT_EXTENSIONS),
+            "requires": [
+                "CAD Exchanger Batch / ExchangerConv",
+                "CATIA V5 input support",
+            ],
+        },
+    }
+
+
 def catpart_backend_diagnostics(
     exact_geometry_backend: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if exact_geometry_backend is None:
         exact_geometry_backend = discover_exact_geometry_backend()
     catia_batch_backend = discover_catia_batch_backend()
+    native_backend_candidates = discover_native_backend_candidates()
 
     freecad_cmd = exact_geometry_backend.get("freecad_cmd") or {}
     freecad_convert_script = exact_geometry_backend.get("freecad_convert_script") or {}
@@ -1757,9 +1871,12 @@ def catpart_backend_diagnostics(
         "required_external_backend_examples": [
             "CAD Exchanger Batch / ExchangerConv",
             "CATIA V5 batch export through catstart/CNEXT/CATScript",
+            "Datakit CrossManager CLI",
+            "3D-Tool NativeCAD Converter",
             "Any local converter callable with {input} and {output}",
         ],
         "catia_batch_backend": catia_batch_backend,
+        "native_backend_candidates": native_backend_candidates,
         "configuration": {
             "CATPART_CONVERTER_BIN": "Absolute path to a CATPart-capable converter executable.",
             "CATPART_CONVERTER_TEMPLATE": (
@@ -1768,12 +1885,18 @@ def catpart_backend_diagnostics(
             "CATPART_CATIA_CATSTART_BIN": "Absolute path to CATIA V5 catstart for the built-in --backend catia path.",
             "CATPART_CATIA_ENV": "Optional CATIA environment name passed to catstart -env.",
             "CATPART_CATIA_DIRENV": "Optional CATIA environment directory passed to catstart -direnv.",
+            "CATPART_DATKIT_BIN": "Absolute path to Datakit CrossManager CLI executable.",
+            "CATPART_DATKIT_TEMPLATE": "Datakit CrossManager CLI command template using {executable}, {input}, {output}, and {format}.",
+            "CATPART_THREEDTOOL_BIN": "Absolute path to 3D-Tool Convert.exe for --backend 3dtool.",
         },
         "example_commands": [
             'export CATPART_CONVERTER_BIN="/absolute/path/to/ExchangerConv"',
             'export CATPART_CONVERTER_TEMPLATE=\'"{executable}" -i "{input}" -e "{output}"\'',
             'export CATPART_CATIA_CATSTART_BIN="/path/to/DassaultSystemes/Bxx/code/command/catstart"',
             'python3 scripts/convert_catpart.py part.CATPart --backend catia --format step',
+            'export CATPART_DATKIT_BIN="/absolute/path/to/CrossManagerCLI"',
+            'export CATPART_DATKIT_TEMPLATE=\'"{executable}" --input "{input}" --output "{output}"\'',
+            'export CATPART_THREEDTOOL_BIN="C:/Program Files/3D-Tool V17/Convert.exe"',
         ],
         "current_limitation": (
             "Without a CATPart-capable backend, this plugin can analyze existing STEP, "
@@ -1786,6 +1909,7 @@ def catpart_backend_diagnostics(
 def probe_environment(args: argparse.Namespace) -> dict[str, Any]:
     exact_geometry_backend = discover_exact_geometry_backend()
     catia_batch_backend = discover_catia_batch_backend()
+    native_backend_candidates = discover_native_backend_candidates()
     try:
         backend = resolve_backend(args)
     except BackendNotFoundError as exc:
@@ -1829,6 +1953,7 @@ def probe_environment(args: argparse.Namespace) -> dict[str, Any]:
             "exact_brep_backend": exact_geometry_backend,
             "native_catpart_with_catia_batch": catia_batch_backend["available"],
             "catia_batch_backend": catia_batch_backend,
+            "native_backend_candidates": native_backend_candidates,
         },
     }
 
@@ -1864,12 +1989,24 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
     env_template = os.environ.get("CATPART_CONVERTER_TEMPLATE")
     executable_override = args.backend_executable or env_executable
     template_override = args.backend_cmd or env_template
+    datakit_executable = args.backend_executable or os.environ.get("CATPART_DATKIT_BIN")
+    datakit_template = (
+        args.backend_cmd
+        or os.environ.get("CATPART_DATKIT_TEMPLATE")
+        or env_template
+    )
+    threedtool_executable = args.backend_executable or os.environ.get("CATPART_THREEDTOOL_BIN")
 
     if args.backend == "custom":
         if not template_override:
             raise BackendNotFoundError(
                 "Custom backend requested but no command template was provided. "
                 "Use --backend-cmd or set CATPART_CONVERTER_TEMPLATE."
+            )
+        if "{executable}" in template_override and not executable_override:
+            raise BackendNotFoundError(
+                "Custom backend template uses {executable}, but no converter executable was provided. "
+                "Use --backend-executable or set CATPART_CONVERTER_BIN."
             )
         return BackendSpec(
             name="custom",
@@ -1879,6 +2016,11 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
         )
 
     if template_override and args.backend == "auto":
+        if "{executable}" in template_override and not executable_override:
+            raise BackendNotFoundError(
+                "CATPART_CONVERTER_TEMPLATE uses {executable}, but no converter executable was provided. "
+                "Set CATPART_CONVERTER_BIN or remove the {executable} placeholder."
+            )
         return BackendSpec(
             name="template",
             executable=executable_override or "",
@@ -1910,13 +2052,82 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
             detected_via="CLI_OR_ENV_CATIA_CATSTART",
         )
 
+    if args.backend in {"auto", "datakit"} and not executable_override and not template_override:
+        datakit_backend = discover_datakit_crossmanager_backend()
+        if datakit_backend["available"]:
+            return BackendSpec(
+                name="datakit_crossmanager_cli",
+                executable=str(datakit_backend["executable"]),
+                template=str(datakit_backend["template"]),
+                detected_via=str(datakit_backend["detected_via"]),
+            )
+
+    if args.backend == "datakit":
+        datakit_detected_via = "CLI_OR_ENV_DATKIT"
+        if not datakit_executable:
+            datakit_discovered = discover_executable(
+                DATAKIT_CROSSMANAGER_EXECUTABLES,
+                DATAKIT_CROSSMANAGER_PATHS,
+            )
+            if datakit_discovered:
+                datakit_executable = datakit_discovered[0]
+                datakit_detected_via = datakit_discovered[1]
+        if not datakit_executable:
+            raise BackendNotFoundError(
+                "Datakit backend requested but CrossManager CLI was not found. "
+                "Set --backend-executable or CATPART_DATKIT_BIN."
+            )
+        if not datakit_template:
+            raise BackendNotFoundError(
+                "Datakit backend requested but no command template was provided. "
+                "Set --backend-cmd or CATPART_DATKIT_TEMPLATE."
+            )
+        return BackendSpec(
+            name="datakit_crossmanager_cli",
+            executable=normalize_path(datakit_executable),
+            template=datakit_template,
+            detected_via=datakit_detected_via,
+        )
+
+    if args.backend in {"auto", "3dtool"} and not executable_override and not template_override:
+        threedtool_backend = discover_3dtool_backend()
+        if threedtool_backend["available"]:
+            return BackendSpec(
+                name="3d_tool",
+                executable=str(threedtool_backend["executable"]),
+                template=THREED_TOOL_TEMPLATE,
+                detected_via=str(threedtool_backend["detected_via"]),
+            )
+
+    if args.backend == "3dtool":
+        threedtool_detected_via = "CLI_OR_ENV_THREEDTOOL"
+        if not threedtool_executable:
+            threedtool_discovered = discover_executable(
+                THREED_TOOL_EXECUTABLES,
+                THREED_TOOL_PATHS,
+            )
+            if threedtool_discovered:
+                threedtool_executable = threedtool_discovered[0]
+                threedtool_detected_via = threedtool_discovered[1]
+        if not threedtool_executable:
+            raise BackendNotFoundError(
+                "3D-Tool backend requested but Convert.exe was not found. "
+                "Set --backend-executable or CATPART_THREEDTOOL_BIN."
+            )
+        return BackendSpec(
+            name="3d_tool",
+            executable=normalize_path(threedtool_executable),
+            template=THREED_TOOL_TEMPLATE,
+            detected_via=threedtool_detected_via,
+        )
+
     if args.backend in {"auto", "cadexchanger"}:
         if executable_override:
             executable = normalize_path(executable_override)
             return BackendSpec(
                 name="cadexchanger",
                 executable=executable,
-                template=CAD_EXCHANGER_TEMPLATE,
+                template=template_override or CAD_EXCHANGER_TEMPLATE,
                 detected_via="CLI_OR_ENV_EXECUTABLE",
             )
 
@@ -1935,13 +2146,18 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
         "This plugin wraps an external CATIA-capable converter because CATPart is a "
         "proprietary format.\n\n"
         "Recommended setup:\n"
-        "1. Install a converter backend such as CAD Exchanger Batch, or use CATIA V5 batch mode.\n"
-        "2. Set CATPART_CONVERTER_BIN to a converter executable, or CATPART_CATIA_CATSTART_BIN to CATIA catstart.\n"
+        "1. Install a converter backend such as CAD Exchanger Batch, Datakit CrossManager CLI, "
+        "3D-Tool NativeCAD Converter, or use CATIA V5 batch mode.\n"
+        "2. Set CATPART_CONVERTER_BIN to a converter executable, CATPART_CATIA_CATSTART_BIN "
+        "to CATIA catstart, CATPART_DATKIT_BIN plus CATPART_DATKIT_TEMPLATE, or "
+        "CATPART_THREEDTOOL_BIN.\n"
         "3. Optionally set CATPART_CONVERTER_TEMPLATE if your converter uses different flags.\n\n"
         "Example:\n"
         '  export CATPART_CONVERTER_BIN="/absolute/path/to/ExchangerConv"\n'
         '  export CATPART_CONVERTER_TEMPLATE=\'"{executable}" -i "{input}" -e "{output}"\'\n'
-        '  export CATPART_CATIA_CATSTART_BIN="/path/to/DassaultSystemes/Bxx/code/command/catstart"'
+        '  export CATPART_CATIA_CATSTART_BIN="/path/to/DassaultSystemes/Bxx/code/command/catstart"\n'
+        '  export CATPART_DATKIT_BIN="/absolute/path/to/CrossManagerCLI"\n'
+        '  export CATPART_THREEDTOOL_BIN="C:/Program Files/3D-Tool V17/Convert.exe"'
     )
 
 

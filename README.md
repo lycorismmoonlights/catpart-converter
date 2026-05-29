@@ -6,9 +6,11 @@ The plugin itself does not reverse-engineer CATPart directly. Instead, it wraps 
 
 - Recommended readable output: `STEP` (`.step` / `.stp`)
 - Native CATIA path: if CATIA V5 `catstart` is installed, `--backend catia` can run a generated CATScript to export `.CATPart` and collect native `Product.Analyze` mass properties
+- Datakit path: if Datakit CrossManager CLI is installed and its command template is provided, `--backend datakit` can be used for CATIA V5 to STEP conversion
+- 3D-Tool path: on Windows with 3D-Tool NativeCAD Converter installed, `--backend 3dtool` uses the documented `Convert.exe -i ... -o ...` batch interface
 - Local `STEP` conversion: existing `.step` / `.stp` files can be converted with `FreeCAD` without a CATPart-specific backend
 - Mesh outputs: `OBJ`, `STL`, `GLTF`, `GLB`
-- Exchange outputs: `IGES`, `BREP`, `X_T`, `X_B`
+- Exchange outputs: `IGES`, `BREP` / `BRP`, `SAT`, `X_T`, `X_B`
 
 After conversion, the script now inspects supported outputs automatically:
 
@@ -97,6 +99,23 @@ export CATPART_CATIA_ENV="CATIA.V5Rxx"
 export CATPART_CATIA_DIRENV="/path/to/CATEnv"
 ```
 
+Use Datakit CrossManager CLI when licensed and installed:
+
+```bash
+export CATPART_DATKIT_BIN="/absolute/path/to/CrossManagerCLI"
+export CATPART_DATKIT_TEMPLATE='"{executable}" --input "{input}" --output "{output}"'
+python3 scripts/convert_catpart.py /path/to/part.CATPart --backend datakit --format step
+```
+
+Datakit's public pages confirm CATIA V5 input and multiple exchange outputs including STEP, but do not publish a stable command syntax in the pages available here, so this plugin requires `CATPART_DATKIT_TEMPLATE` instead of guessing.
+
+Use 3D-Tool NativeCAD Converter on Windows:
+
+```bash
+set CATPART_THREEDTOOL_BIN=C:\Program Files\3D-Tool V17\Convert.exe
+python scripts\convert_catpart.py C:\path\part.CATPart --backend 3dtool --format step
+```
+
 Analyze an existing exported file without re-running conversion:
 
 ```bash
@@ -157,6 +176,15 @@ You can configure the backend with environment variables:
 - `CATPART_CATIA_TIMEOUT_SECONDS`
   Optional timeout for CATIA batch conversion. Defaults to `300` seconds.
 
+- `CATPART_DATKIT_BIN`
+  Optional absolute path to Datakit CrossManager CLI.
+
+- `CATPART_DATKIT_TEMPLATE`
+  Required command template for `--backend datakit`, because public Datakit pages confirm CrossManager CLI capability but do not expose stable syntax.
+
+- `CATPART_THREEDTOOL_BIN`
+  Optional absolute path to 3D-Tool `Convert.exe`. Enables `--backend 3dtool` with the documented `"{executable}" -i "{input}" -o "{output}"` command shape.
+
 - `CATPART_FREECAD_TIMEOUT_SECONDS`
   Optional timeout for `FreeCAD` exact geometry analysis. Defaults to `45` seconds.
 
@@ -188,6 +216,7 @@ python3 scripts/convert_catpart.py /path/to/part.CATPart
 - If no backend is installed, the script exits with a clear setup message instead of failing silently.
 - Missing CATPart backends are reported with structured diagnostics, including current FreeCAD capabilities, supported local exchange formats, example external backends, and `CATPART_CONVERTER_BIN` / `CATPART_CONVERTER_TEMPLATE` setup hints.
 - `--backend catia` uses CATIA V5 batch automation through `catstart -run "CNEXT -batch -macro ..."`. It is the preferred path for native CATPart mass/volume when CATIA and the needed licenses are installed locally.
+- `--backend datakit` and `--backend 3dtool` cover additional real-world CATPart converters discovered from vendor documentation. `--probe` reports their environment variables and whether they are detected.
 - `--probe` now reports both conversion backend availability and local analysis capabilities.
 - `freecadcmd` is auto-detected from `PATH`, common app paths, and common conda environment locations such as `/opt/anaconda3/envs/*/bin/freecadcmd`.
 - For multi-file use, pass multiple input files and an `--output-dir`.

@@ -39,11 +39,26 @@ python3 plugins/catpart-converter/scripts/convert_catpart.py "<input.CATPart>" -
 
 This backend generates a CATScript, runs `catstart -run "CNEXT -batch -macro ..."`, exports STEP/IGES/STL, and records CATIA `Product.Analyze` mass, volume, wet area, gravity center, and inertia matrix when CATIA exposes them.
 
-5. If the conversion succeeds, read the terminal summary or JSON report first.
-6. For `STEP`, prefer the generated engineering summary first. It combines textual metadata, broad value-type scanning, and exact `FreeCAD` geometry measurements when `freecadcmd` is available.
-7. For existing `BREP` or `IGES` files, use `--analysis-only` to get exact topology, area, volume, center of gravity, and bounding box measurements.
-8. If the backend is missing for `.CATPart`, explain that the plugin is installed but still needs an external CATIA-capable converter backend.
-9. When a report contains `diagnostics`, use it to distinguish missing native CATPart conversion from available local FreeCAD analysis/conversion of existing exchange files.
+5. If Datakit CrossManager CLI is installed, use `--backend datakit` with `CATPART_DATKIT_BIN` and a command template from the installed product:
+
+```bash
+CATPART_DATKIT_BIN="/path/to/CrossManagerCLI" \
+CATPART_DATKIT_TEMPLATE='"{executable}" --input "{input}" --output "{output}"' \
+python3 plugins/catpart-converter/scripts/convert_catpart.py "<input.CATPart>" --backend datakit --format step
+```
+
+6. If 3D-Tool NativeCAD Converter is installed on Windows, use `--backend 3dtool`:
+
+```bash
+set CATPART_THREEDTOOL_BIN=C:\Program Files\3D-Tool V17\Convert.exe
+python scripts\convert_catpart.py "<input.CATPart>" --backend 3dtool --format step
+```
+
+7. If the conversion succeeds, read the terminal summary or JSON report first.
+8. For `STEP`, prefer the generated engineering summary first. It combines textual metadata, broad value-type scanning, and exact `FreeCAD` geometry measurements when `freecadcmd` is available.
+9. For existing `BREP` or `IGES` files, use `--analysis-only` to get exact topology, area, volume, center of gravity, and bounding box measurements.
+10. If the backend is missing for `.CATPart`, explain that the plugin is installed but still needs an external CATIA-capable converter backend.
+11. When a report contains `diagnostics`, use it to distinguish missing native CATPart conversion from available local FreeCAD analysis/conversion of existing exchange files.
 
 ## Backend setup
 
@@ -52,7 +67,9 @@ The script will auto-detect a backend in this order:
 1. `CATPART_CONVERTER_TEMPLATE`
 2. `CATPART_CONVERTER_BIN`
 3. `CATPART_CATIA_CATSTART_BIN` / common CATIA `catstart` locations
-4. common `CAD Exchanger` executable names and paths
+4. `CATPART_DATKIT_BIN` plus `CATPART_DATKIT_TEMPLATE` / common Datakit CrossManager CLI names and paths
+5. `CATPART_THREEDTOOL_BIN` / common 3D-Tool `Convert.exe` paths
+6. common `CAD Exchanger` executable names and paths
 
 For exact `STEP`, `BREP`, and `IGES` geometry analysis it will also auto-detect `freecadcmd` from:
 
@@ -67,7 +84,7 @@ You can probe the environment with:
 python3 plugins/catpart-converter/scripts/convert_catpart.py --probe
 ```
 
-If no CATPart-capable backend is found, `--probe` returns structured diagnostics with current FreeCAD capabilities, required backend examples, and the exact environment variables to configure.
+If no CATPart-capable backend is found, `--probe` returns structured diagnostics with current FreeCAD capabilities, native backend candidates, required backend examples, and the exact environment variables to configure.
 
 ## Output guidance
 
@@ -79,6 +96,8 @@ If no CATPart-capable backend is found, `--probe` returns structured diagnostics
 - Exact `FreeCAD` summaries can include per-solid details, shell details, static moments, inertia matrices, and principal inertia properties when available.
 - `STEP` text summaries include numeric ranges and value-type counts for integers, reals, scientific notation, logicals, enumerations, references, strings, omitted values, and derived values.
 - Local FreeCAD conversion can convert existing `STEP/STP/BREP/IGES/IGS` inputs to `STEP/STP/BREP/IGES/IGS/STL/OBJ` when `--backend auto` is used.
+- `--probe` reports candidate native CATPart backends for CATIA V5 batch, Datakit CrossManager CLI, 3D-Tool NativeCAD Converter, and CAD Exchanger Batch.
+- Datakit and 3D-Tool are conversion backends only in this plugin. Exact native mass/volume still requires CATIA `Product.Analyze`, or a successful STEP/BREP/IGES export followed by FreeCAD analysis.
 - Use `--analysis-only` when the user already has a converted `STEP`, `OBJ`, `STL`, `BREP`, or `IGES`.
 - Use `--assume-unit mm` or `--assume-unit m` for mesh files when unit labeling matters.
 - Use `--assume-unit mm` or `--assume-unit m` for `BREP` and `IGES` when the geometry units are known operationally but not labeled clearly in the surrounding workflow.

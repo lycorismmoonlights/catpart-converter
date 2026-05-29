@@ -154,6 +154,206 @@ class ConvertCatpartTests(unittest.TestCase):
         self.assertEqual(backend.executable, "/bin/echo")
         self.assertIn("CNEXT -batch -macro", backend.template)
 
+    def test_resolve_cadexchanger_honors_template_override(self) -> None:
+        args = argparse.Namespace(
+            backend="cadexchanger",
+            backend_executable="/bin/echo",
+            backend_cmd='"{executable}" --from "{input}" --to "{output}"',
+        )
+
+        backend = convert_catpart.resolve_backend(args)
+
+        self.assertEqual(backend.name, "cadexchanger")
+        self.assertEqual(backend.executable, "/bin/echo")
+        self.assertIn("--from", backend.template)
+        self.assertIn("--to", backend.template)
+
+    def test_resolve_custom_template_requires_executable_when_placeholder_is_used(self) -> None:
+        args = argparse.Namespace(
+            backend="custom",
+            backend_executable=None,
+            backend_cmd='"{executable}" --input "{input}" --output "{output}"',
+        )
+
+        with self.assertRaises(convert_catpart.BackendNotFoundError):
+            convert_catpart.resolve_backend(args)
+
+    def test_resolve_auto_self_contained_template_without_executable(self) -> None:
+        args = argparse.Namespace(
+            backend="auto",
+            backend_executable=None,
+            backend_cmd='"/bin/echo" "{input}" "{output}"',
+        )
+
+        backend = convert_catpart.resolve_backend(args)
+
+        self.assertEqual(backend.name, "template")
+        self.assertEqual(backend.executable, "")
+        self.assertIn("/bin/echo", backend.template)
+
+    def test_probe_lists_native_backend_candidates(self) -> None:
+        args = argparse.Namespace(
+            backend="auto",
+            backend_executable=None,
+            backend_cmd=None,
+        )
+
+        payload = convert_catpart.probe_environment(args)
+        candidates = payload["analysis_capabilities"]["native_backend_candidates"]
+
+        self.assertIn("catia_v5_batch", candidates)
+        self.assertIn("datakit_crossmanager_cli", candidates)
+        self.assertIn("three_d_tool", candidates)
+        self.assertIn("cad_exchanger_batch", candidates)
+
+    def test_exchange_output_formats_are_cli_selectable(self) -> None:
+        self.assertIn("brp", convert_catpart.FORMAT_EXTENSIONS)
+        self.assertIn("sat", convert_catpart.FORMAT_EXTENSIONS)
+        self.assertTrue(
+            convert_catpart.FREECAD_CONVERT_OUTPUT_FORMATS.issubset(
+                convert_catpart.FORMAT_EXTENSIONS
+            )
+        )
+
+    def test_resolve_datakit_backend_from_env_template(self) -> None:
+        original_bin = os.environ.get("CATPART_DATKIT_BIN")
+        original_template = os.environ.get("CATPART_DATKIT_TEMPLATE")
+        os.environ["CATPART_DATKIT_BIN"] = "/bin/echo"
+        os.environ["CATPART_DATKIT_TEMPLATE"] = '"{executable}" --input "{input}" --output "{output}"'
+        try:
+            args = argparse.Namespace(
+                backend="datakit",
+                backend_executable=None,
+                backend_cmd=None,
+            )
+
+            backend = convert_catpart.resolve_backend(args)
+        finally:
+            if original_bin is None:
+                os.environ.pop("CATPART_DATKIT_BIN", None)
+            else:
+                os.environ["CATPART_DATKIT_BIN"] = original_bin
+            if original_template is None:
+                os.environ.pop("CATPART_DATKIT_TEMPLATE", None)
+            else:
+                os.environ["CATPART_DATKIT_TEMPLATE"] = original_template
+
+        self.assertEqual(backend.name, "datakit_crossmanager_cli")
+        self.assertEqual(backend.executable, "/bin/echo")
+        self.assertIn("--input", backend.template)
+
+    def test_resolve_datakit_backend_cmd_with_path_discovery(self) -> None:
+        original_path = os.environ.get("PATH")
+        original_bin = os.environ.get("CATPART_DATKIT_BIN")
+        original_template = os.environ.get("CATPART_DATKIT_TEMPLATE")
+        os.environ.pop("CATPART_DATKIT_BIN", None)
+        os.environ.pop("CATPART_DATKIT_TEMPLATE", None)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            executable = Path(temp_dir) / "CrossManagerCLI"
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+            os.environ["PATH"] = f"{temp_dir}{os.pathsep}{original_path or ''}"
+            try:
+                args = argparse.Namespace(
+                    backend="datakit",
+                    backend_executable=None,
+                    backend_cmd='"{executable}" --input "{input}" --output "{output}"',
+                )
+
+                backend = convert_catpart.resolve_backend(args)
+            finally:
+                if original_path is None:
+                    os.environ.pop("PATH", None)
+                else:
+                    os.environ["PATH"] = original_path
+                if original_bin is None:
+                    os.environ.pop("CATPART_DATKIT_BIN", None)
+                else:
+                    os.environ["CATPART_DATKIT_BIN"] = original_bin
+                if original_template is None:
+                    os.environ.pop("CATPART_DATKIT_TEMPLATE", None)
+                else:
+                    os.environ["CATPART_DATKIT_TEMPLATE"] = original_template
+
+        self.assertEqual(backend.name, "datakit_crossmanager_cli")
+        self.assertEqual(backend.executable, str(executable.resolve()))
+        self.assertIn("--input", backend.template)
+
+    def test_resolve_datakit_backend_requires_template(self) -> None:
+        original_bin = os.environ.get("CATPART_DATKIT_BIN")
+        original_template = os.environ.get("CATPART_DATKIT_TEMPLATE")
+        os.environ["CATPART_DATKIT_BIN"] = "/bin/echo"
+        os.environ.pop("CATPART_DATKIT_TEMPLATE", None)
+        try:
+            args = argparse.Namespace(
+                backend="datakit",
+                backend_executable=None,
+                backend_cmd=None,
+            )
+
+            with self.assertRaises(convert_catpart.BackendNotFoundError):
+                convert_catpart.resolve_backend(args)
+        finally:
+            if original_bin is None:
+                os.environ.pop("CATPART_DATKIT_BIN", None)
+            else:
+                os.environ["CATPART_DATKIT_BIN"] = original_bin
+            if original_template is not None:
+                os.environ["CATPART_DATKIT_TEMPLATE"] = original_template
+
+    def test_resolve_3dtool_backend_from_env(self) -> None:
+        original = os.environ.get("CATPART_THREEDTOOL_BIN")
+        os.environ["CATPART_THREEDTOOL_BIN"] = "/bin/echo"
+        try:
+            args = argparse.Namespace(
+                backend="3dtool",
+                backend_executable=None,
+                backend_cmd=None,
+            )
+
+            backend = convert_catpart.resolve_backend(args)
+        finally:
+            if original is None:
+                os.environ.pop("CATPART_THREEDTOOL_BIN", None)
+            else:
+                os.environ["CATPART_THREEDTOOL_BIN"] = original
+
+        self.assertEqual(backend.name, "3d_tool")
+        self.assertEqual(backend.executable, "/bin/echo")
+        self.assertIn("-i", backend.template)
+        self.assertIn("-o", backend.template)
+
+    def test_resolve_3dtool_backend_cmd_still_discovers_path(self) -> None:
+        original_path = os.environ.get("PATH")
+        original = os.environ.get("CATPART_THREEDTOOL_BIN")
+        os.environ.pop("CATPART_THREEDTOOL_BIN", None)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            executable = Path(temp_dir) / "Convert.exe"
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+            os.environ["PATH"] = f"{temp_dir}{os.pathsep}{original_path or ''}"
+            try:
+                args = argparse.Namespace(
+                    backend="3dtool",
+                    backend_executable=None,
+                    backend_cmd='"{executable}" --ignored "{input}" "{output}"',
+                )
+
+                backend = convert_catpart.resolve_backend(args)
+            finally:
+                if original_path is None:
+                    os.environ.pop("PATH", None)
+                else:
+                    os.environ["PATH"] = original_path
+                if original is None:
+                    os.environ.pop("CATPART_THREEDTOOL_BIN", None)
+                else:
+                    os.environ["CATPART_THREEDTOOL_BIN"] = original
+
+        self.assertEqual(backend.name, "3d_tool")
+        self.assertEqual(backend.executable, str(executable.resolve()))
+        self.assertEqual(backend.template, convert_catpart.THREED_TOOL_TEMPLATE)
+
     def test_render_catia_batch_macro_exports_and_reads_native_properties(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
