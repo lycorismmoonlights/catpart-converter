@@ -10,6 +10,7 @@ description: Convert CATIA CATPart files into readable exchange formats such as 
 Use this skill when the user wants to:
 
 - convert a `.CATPart` file into a format Codex can inspect
+- convert an existing `.step` or `.stp` file locally with FreeCAD
 - inspect CATIA part geometry through a readable exchange format
 - batch-convert CATPart files into `STEP`, `OBJ`, `STL`, `IGES`, or `BREP`
 - extract engineering summaries after conversion
@@ -18,16 +19,22 @@ Use this skill when the user wants to:
 ## Default workflow
 
 1. Prefer `STEP` unless the user asks for another format.
-2. Run the local converter script:
+2. If the user already has a `.step` or `.stp`, use local FreeCAD conversion when a different target is needed:
+
+```bash
+python3 plugins/catpart-converter/scripts/convert_catpart.py "<input.step>" --source-format step --format brep
+```
+
+3. For `.CATPart`, run the local converter script:
 
 ```bash
 python3 plugins/catpart-converter/scripts/convert_catpart.py "<input.CATPart>" --format step
 ```
 
-3. If the conversion succeeds, read the terminal summary or JSON report first.
-4. For `STEP`, prefer the generated engineering summary first. It now combines textual metadata with exact `FreeCAD` geometry measurements when `freecadcmd` is available.
-5. For existing `BREP` or `IGES` files, use `--analysis-only` to get exact topology, area, volume, center of gravity, and bounding box measurements.
-6. If the backend is missing, explain that the plugin is installed but still needs an external CATIA-capable converter backend.
+4. If the conversion succeeds, read the terminal summary or JSON report first.
+5. For `STEP`, prefer the generated engineering summary first. It combines textual metadata, broad value-type scanning, and exact `FreeCAD` geometry measurements when `freecadcmd` is available.
+6. For existing `BREP` or `IGES` files, use `--analysis-only` to get exact topology, area, volume, center of gravity, and bounding box measurements.
+7. If the backend is missing for `.CATPart`, explain that the plugin is installed but still needs an external CATIA-capable converter backend.
 
 ## Backend setup
 
@@ -58,6 +65,8 @@ python3 plugins/catpart-converter/scripts/convert_catpart.py --probe
 - `STEP` summaries are the best option for engineering metadata. Mesh summaries are useful for geometry size and complexity, but not for B-Rep semantics.
 - When `FreeCAD` is available, `STEP` summaries also include exact area, enclosed volume, center of gravity, and a non-inferred bounding box.
 - Exact `FreeCAD` summaries can include per-solid details, shell details, static moments, inertia matrices, and principal inertia properties when available.
+- `STEP` text summaries include numeric ranges and value-type counts for integers, reals, scientific notation, logicals, enumerations, references, strings, omitted values, and derived values.
+- Local FreeCAD conversion can convert existing `STEP/STP/BREP/IGES/IGS` inputs to `STEP/STP/BREP/IGES/IGS/STL/OBJ` when `--backend auto` is used.
 - Use `--analysis-only` when the user already has a converted `STEP`, `OBJ`, `STL`, `BREP`, or `IGES`.
 - Use `--assume-unit mm` or `--assume-unit m` for mesh files when unit labeling matters.
 - Use `--assume-unit mm` or `--assume-unit m` for `BREP` and `IGES` when the geometry units are known operationally but not labeled clearly in the surrounding workflow.

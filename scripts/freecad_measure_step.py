@@ -218,7 +218,7 @@ def main() -> int:
 
     step_path = Path(raw_input).expanduser().resolve()
     if not step_path.exists():
-        print(f"STEP file not found: {step_path}", file=sys.stderr)
+        print(f"Geometry file not found: {step_path}", file=sys.stderr)
         return 2
 
     shape = Part.Shape()

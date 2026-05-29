@@ -34,7 +34,19 @@ FORMAT_EXTENSIONS = {
     "gltf": ".gltf",
     "glb": ".glb",
 }
+SOURCE_FORMATS = {
+    "auto",
+    "catpart",
+    "step",
+    "stp",
+    "brep",
+    "brp",
+    "iges",
+    "igs",
+}
 ANALYSIS_FORMATS = {"step", "stp", "obj", "stl", "brep", "brp", "iges", "igs"}
+FREECAD_CONVERT_INPUT_FORMATS = {"step", "stp", "brep", "brp", "iges", "igs"}
+FREECAD_CONVERT_OUTPUT_FORMATS = {"step", "stp", "brep", "brp", "iges", "igs", "stl", "obj"}
 
 CAD_EXCHANGER_EXECUTABLES = [
     "ExchangerConv",
@@ -69,6 +81,7 @@ FREECAD_GLOB_PATTERNS = [
 FREECAD_JSON_PREFIX = "JSON_RESULT="
 FREECAD_INPUT_ENV_NAMES = ("CATPART_EXACT_GEOMETRY_INPUT", "CATPART_STEP_INPUT")
 FREECAD_MEASURE_SCRIPT = Path(__file__).with_name("freecad_measure_step.py")
+FREECAD_CONVERT_SCRIPT = Path(__file__).with_name("freecad_convert.py")
 DEFAULT_FREECAD_TIMEOUT_SECONDS = 45.0
 DEFAULT_DETAIL_LIMIT = 100
 LENGTH_UNIT_TO_MM = {
@@ -122,6 +135,7 @@ LENGTH_UNIT_ALIASES = {
 
 CAD_EXCHANGER_TEMPLATE = '"{executable}" -i "{input}" -e "{output}"'
 FLOAT_RE = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[Ee][-+]?\d+)?")
+STEP_NUMBER_START_RE = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?")
 STEP_ENTITY_RE = re.compile(r"#\d+\s*=\s*([A-Z0-9_]+)\s*\(")
 STEP_PRODUCT_RE = re.compile(r"PRODUCT\s*\(\s*'([^']*)'", re.IGNORECASE)
 STEP_FILE_DESCRIPTION_RE = re.compile(
@@ -177,6 +191,15 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("inputs", nargs="*", help="Input CATPart files")
+    parser.add_argument(
+        "--source-format",
+        choices=sorted(SOURCE_FORMATS),
+        default="auto",
+        help=(
+            "Input format hint. Use step/stp to convert an existing STEP file locally "
+            "with FreeCAD when --backend is auto."
+        ),
+    )
     parser.add_argument(
         "--format",
         default="step",
@@ -545,6 +568,170 @@ def step_records(path: Path) -> list[str]:
     return [record.strip() + ";" for record in text.split(";") if record.strip()]
 
 
+def update_numeric_summary(summary: dict[str, Any], raw_value: str) -> None:
+    numeric = summary["numeric"]
+    value = float(raw_value)
+    is_real = "." in raw_value or "E" in raw_value.upper()
+    is_exponential = "E" in raw_value.upper()
+
+    numeric["total_count"] += 1
+    numeric["real_count" if is_real else "integer_count"] += 1
+    if is_exponential:
+        numeric["exponential_count"] += 1
+    if value > 0:
+        numeric["positive_count"] += 1
+    elif value < 0:
+        numeric["negative_count"] += 1
+    else:
+        numeric["zero_count"] += 1
+
+    numeric["min"] = value if numeric["min"] is None else min(numeric["min"], value)
+    numeric["max"] = value if numeric["max"] is None else max(numeric["max"], value)
+    if not is_real:
+        integer_value = int(raw_value)
+        numeric["integer_min"] = (
+            integer_value
+            if numeric["integer_min"] is None
+            else min(numeric["integer_min"], integer_value)
+        )
+        numeric["integer_max"] = (
+            integer_value
+            if numeric["integer_max"] is None
+            else max(numeric["integer_max"], integer_value)
+        )
+    else:
+        numeric["real_min"] = value if numeric["real_min"] is None else min(numeric["real_min"], value)
+        numeric["real_max"] = value if numeric["real_max"] is None else max(numeric["real_max"], value)
+
+    examples = numeric["examples"]
+    example_key = "exponential" if is_exponential else ("real" if is_real else "integer")
+    if len(examples[example_key]) < 10:
+        examples[example_key].append(raw_value)
+
+
+def skip_step_string(text: str, start_index: int) -> int:
+    index = start_index + 1
+    length = len(text)
+    while index < length:
+        if text[index] == "'":
+            if index + 1 < length and text[index + 1] == "'":
+                index += 2
+                continue
+            return index + 1
+        index += 1
+    return length
+
+
+def summarize_step_values(text: str) -> dict[str, Any]:
+    value_counts: Counter[str] = Counter()
+    numeric_summary: dict[str, Any] = {
+        "total_count": 0,
+        "integer_count": 0,
+        "real_count": 0,
+        "exponential_count": 0,
+        "positive_count": 0,
+        "negative_count": 0,
+        "zero_count": 0,
+        "min": None,
+        "max": None,
+        "integer_min": None,
+        "integer_max": None,
+        "real_min": None,
+        "real_max": None,
+        "examples": {
+            "integer": [],
+            "real": [],
+            "exponential": [],
+        },
+    }
+    summary = {
+        "read_strategy": "step_lexical_value_scan",
+        "value_type_counts": value_counts,
+        "numeric": numeric_summary,
+    }
+
+    index = 0
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char == "'":
+            value_counts["string"] += 1
+            index = skip_step_string(text, index)
+            continue
+
+        if char == "#":
+            next_index = index + 1
+            while next_index < length and text[next_index].isdigit():
+                next_index += 1
+            if next_index > index + 1:
+                value_counts["entity_reference"] += 1
+                index = next_index
+                continue
+
+        if char == "$":
+            value_counts["omitted"] += 1
+            index += 1
+            continue
+
+        if char == "*":
+            value_counts["derived"] += 1
+            index += 1
+            continue
+
+        if char == "(":
+            value_counts["list_open"] += 1
+            index += 1
+            continue
+
+        if char == ")":
+            value_counts["list_close"] += 1
+            index += 1
+            continue
+
+        if char == "." and index + 1 < length and not text[index + 1].isdigit():
+            end_index = text.find(".", index + 1)
+            if end_index != -1:
+                dot_token = text[index + 1 : end_index].upper()
+                if dot_token == "T":
+                    value_counts["logical_true"] += 1
+                elif dot_token == "F":
+                    value_counts["logical_false"] += 1
+                elif dot_token == "U":
+                    value_counts["logical_unknown"] += 1
+                elif dot_token:
+                    value_counts["enumeration"] += 1
+                index = end_index + 1
+                continue
+
+        previous = text[index - 1] if index > 0 else ""
+        if previous and (previous.isalnum() or previous in "#_"):
+            index += 1
+            continue
+
+        match = STEP_NUMBER_START_RE.match(text, index)
+        if match:
+            next_index = match.end()
+            following = text[next_index] if next_index < length else ""
+            if not following or not (following.isalnum() or following == "_"):
+                value_counts["number"] += 1
+                update_numeric_summary(summary, match.group(0))
+                index = next_index
+                continue
+
+        index += 1
+
+    summary["value_type_counts"] = dict(value_counts)
+    numeric_summary["min"] = round_number(numeric_summary["min"]) if numeric_summary["min"] is not None else None
+    numeric_summary["max"] = round_number(numeric_summary["max"]) if numeric_summary["max"] is not None else None
+    numeric_summary["real_min"] = (
+        round_number(numeric_summary["real_min"]) if numeric_summary["real_min"] is not None else None
+    )
+    numeric_summary["real_max"] = (
+        round_number(numeric_summary["real_max"]) if numeric_summary["real_max"] is not None else None
+    )
+    return summary
+
+
 def analyze_step_textual_file(path: Path) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8", errors="ignore")
     records = step_records(path)
@@ -616,6 +803,7 @@ def analyze_step_textual_file(path: Path) -> dict[str, Any]:
         "bbox_mm": step_bbox_in_mm(bbox_native, length_unit),
         "topology": topological_counts,
         "entity_counts": dict(entity_counts.most_common(20)),
+        "step_value_summary": summarize_step_values(text),
         "curves_and_surfaces": {
             "bspline_curves": entity_counts.get("B_SPLINE_CURVE_WITH_KNOTS", 0),
             "bspline_surfaces": entity_counts.get("B_SPLINE_SURFACE_WITH_KNOTS", 0),
@@ -760,6 +948,54 @@ def run_freecad_exact_shape_analysis(path: Path) -> tuple[dict[str, Any], dict[s
         "timeout_seconds": round_number(timeout_seconds, 3),
         "detail_limit": detail_limit(),
     }
+
+
+def run_freecad_geometry_conversion(
+    input_path: Path,
+    output_path: Path,
+    output_format: str,
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    discovered = discover_freecad_executable()
+    if discovered is None:
+        raise BackendNotFoundError("No FreeCAD command backend was found for local geometry conversion.")
+
+    if not FREECAD_CONVERT_SCRIPT.exists():
+        raise FileNotFoundError(f"FreeCAD conversion helper script is missing: {FREECAD_CONVERT_SCRIPT}")
+
+    executable, detected_via = discovered
+    environment = os.environ.copy()
+    environment["CATPART_GEOMETRY_INPUT"] = str(input_path)
+    environment["CATPART_GEOMETRY_OUTPUT"] = str(output_path)
+    environment["CATPART_GEOMETRY_OUTPUT_FORMAT"] = output_format
+    timeout_seconds = freecad_timeout_seconds()
+    command = [executable, str(FREECAD_CONVERT_SCRIPT)]
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            env=environment,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"FreeCAD conversion timed out after {round_number(timeout_seconds, 3)} seconds."
+        ) from exc
+
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "FreeCAD conversion failed").strip()
+        raise RuntimeError(detail)
+
+    metadata = {
+        "path": executable,
+        "detected_via": detected_via,
+        "helper_script": str(FREECAD_CONVERT_SCRIPT),
+        "timeout_seconds": round_number(timeout_seconds, 3),
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+        "returncode": completed.returncode,
+    }
+    return parse_freecad_json(completed.stdout), metadata, command
 
 
 def build_exact_geometry_metadata(
@@ -1390,6 +1626,12 @@ def discover_exact_geometry_backend() -> dict[str, Any]:
             "available": FREECAD_MEASURE_SCRIPT.exists(),
             "path": str(FREECAD_MEASURE_SCRIPT),
         },
+        "freecad_convert_script": {
+            "available": FREECAD_CONVERT_SCRIPT.exists(),
+            "path": str(FREECAD_CONVERT_SCRIPT),
+            "input_formats": sorted(FREECAD_CONVERT_INPUT_FORMATS),
+            "output_formats": sorted(FREECAD_CONVERT_OUTPUT_FORMATS),
+        },
         "freecad_timeout_seconds": round_number(freecad_timeout_seconds(), 3),
         "detail_limit": detail_limit(),
     }
@@ -1431,6 +1673,11 @@ def probe_environment(args: argparse.Namespace) -> dict[str, Any]:
             "polyhedral_stl_analysis": True,
             "mesh_surface_area": True,
             "mesh_volume_when_watertight": True,
+            "local_step_conversion_with_freecad": bool(
+                exact_geometry_backend["freecad_cmd"]["available"]
+                and exact_geometry_backend["freecad_convert_script"]["available"]
+            ),
+            "local_step_conversion_outputs": sorted(FREECAD_CONVERT_OUTPUT_FORMATS),
             "exact_brep_backend": exact_geometry_backend,
         },
     }
@@ -1547,6 +1794,26 @@ def determine_output_path(
     return input_path.with_suffix(extension)
 
 
+def infer_source_format(path: Path, requested_source_format: str) -> str:
+    if requested_source_format != "auto":
+        return requested_source_format
+
+    suffix = path.suffix.lower().lstrip(".")
+    if suffix in {"catpart"}:
+        return "catpart"
+    if suffix in FREECAD_CONVERT_INPUT_FORMATS:
+        return suffix
+    return "catpart"
+
+
+def can_use_freecad_conversion(source_format: str, output_format: str, backend_name: str) -> bool:
+    return (
+        backend_name == "auto"
+        and source_format in FREECAD_CONVERT_INPUT_FORMATS
+        and output_format in FREECAD_CONVERT_OUTPUT_FORMATS
+    )
+
+
 def validate_inputs(args: argparse.Namespace) -> list[Path]:
     if args.probe:
         return []
@@ -1657,6 +1924,108 @@ def convert_one(
     return result
 
 
+def convert_one_with_freecad(
+    input_path: Path,
+    output_path: Path,
+    output_format: str,
+    source_format: str,
+    overwrite: bool,
+    dry_run: bool,
+    analyze: bool,
+    assume_unit: str | None,
+) -> dict[str, Any]:
+    started_at = time.time()
+    source_sha256 = sha256_of(input_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if input_path == output_path:
+        raise FileExistsError(
+            f"Output path resolves to the source file: {output_path}. Choose a different output path."
+        )
+
+    if output_format not in FREECAD_CONVERT_OUTPUT_FORMATS:
+        raise ValueError(
+            f"FreeCAD local conversion does not support target format '{output_format}'. "
+            f"Supported targets: {', '.join(sorted(FREECAD_CONVERT_OUTPUT_FORMATS))}."
+        )
+
+    discovered = discover_freecad_executable()
+    if discovered is None:
+        raise BackendNotFoundError("No FreeCAD command backend was found for local STEP conversion.")
+    freecad_executable, detected_via = discovered
+    command = [freecad_executable, str(FREECAD_CONVERT_SCRIPT)]
+    result: dict[str, Any] = {
+        "source": str(input_path),
+        "source_format": source_format,
+        "output": str(output_path),
+        "format": output_format,
+        "backend": "freecad",
+        "backend_detected_via": detected_via,
+        "command": command,
+        "status": "dry_run" if dry_run else "pending",
+        "started_at_epoch": started_at,
+        "source_sha256": source_sha256,
+        "freecad_environment": {
+            "CATPART_GEOMETRY_INPUT": str(input_path),
+            "CATPART_GEOMETRY_OUTPUT": str(output_path),
+            "CATPART_GEOMETRY_OUTPUT_FORMAT": output_format,
+        },
+    }
+
+    if output_path.exists() and not overwrite:
+        raise FileExistsError(
+            f"Output already exists: {output_path}. Re-run with --overwrite to replace it."
+        )
+
+    if dry_run:
+        result["duration_seconds"] = 0.0
+        return result
+
+    if output_path.exists() and overwrite:
+        output_path.unlink()
+
+    try:
+        conversion_metadata, backend_metadata, command = run_freecad_geometry_conversion(
+            input_path,
+            output_path,
+            output_format,
+        )
+    except Exception as exc:
+        result["status"] = "failed"
+        result["error"] = str(exc)
+        result["error_type"] = type(exc).__name__
+        result["duration_seconds"] = round(time.time() - started_at, 3)
+        return result
+
+    result["command"] = command
+    result["returncode"] = backend_metadata["returncode"]
+    result["stdout"] = backend_metadata["stdout"]
+    result["stderr"] = backend_metadata["stderr"]
+    result["duration_seconds"] = round(time.time() - started_at, 3)
+    result["conversion"] = conversion_metadata
+
+    if not output_path.exists():
+        result["status"] = "failed"
+        result["stderr"] = (
+            (result.get("stderr") or "")
+            + "\nFreeCAD conversion returned success but no output file was created."
+        ).strip()
+        return result
+
+    result["status"] = "converted"
+    result["output_sha256"] = sha256_of(output_path)
+    result["output_size_bytes"] = output_path.stat().st_size
+    if analyze:
+        try:
+            analysis = analyze_output_file(output_path, output_format, assume_unit=assume_unit)
+        except Exception as exc:  # pragma: no cover - defensive reporting
+            result["analysis_error"] = str(exc)
+        else:
+            if analysis is not None:
+                result["analysis"] = analysis
+    return result
+
+
 def analyze_existing_file(
     path: Path,
     *,
@@ -1726,16 +2095,12 @@ def main() -> int:
             write_report(args.report, report_payload)
         return 1 if failures else 0
 
-    try:
-        backend = resolve_backend(args)
-    except BackendNotFoundError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-
     results: list[dict[str, Any]] = []
     failures = 0
+    backend: BackendSpec | None = None
 
     for input_path in inputs:
+        source_format = infer_source_format(input_path, args.source_format)
         output_path = determine_output_path(
             input_path=input_path,
             output_format=args.format,
@@ -1744,23 +2109,39 @@ def main() -> int:
         )
 
         try:
-            result = convert_one(
-                backend=backend,
-                input_path=input_path,
-                output_path=output_path,
-                output_format=args.format,
-                overwrite=args.overwrite,
-                dry_run=args.dry_run,
-                analyze=not args.skip_analysis,
-                assume_unit=args.assume_unit,
-            )
-        except (FileExistsError, ValueError) as exc:
+            if args.backend == "auto" and source_format in FREECAD_CONVERT_INPUT_FORMATS:
+                result = convert_one_with_freecad(
+                    input_path=input_path,
+                    output_path=output_path,
+                    output_format=args.format,
+                    source_format=source_format,
+                    overwrite=args.overwrite,
+                    dry_run=args.dry_run,
+                    analyze=not args.skip_analysis,
+                    assume_unit=args.assume_unit,
+                )
+            else:
+                if backend is None:
+                    backend = resolve_backend(args)
+                result = convert_one(
+                    backend=backend,
+                    input_path=input_path,
+                    output_path=output_path,
+                    output_format=args.format,
+                    overwrite=args.overwrite,
+                    dry_run=args.dry_run,
+                    analyze=not args.skip_analysis,
+                    assume_unit=args.assume_unit,
+                )
+                result["source_format"] = source_format
+        except (BackendNotFoundError, FileExistsError, ValueError) as exc:
             result = {
                 "source": str(input_path),
+                "source_format": source_format,
                 "output": str(output_path),
                 "format": args.format,
-                "backend": backend.name,
-                "backend_detected_via": backend.detected_via,
+                "backend": backend.name if backend else ("freecad" if source_format in FREECAD_CONVERT_INPUT_FORMATS else args.backend),
+                "backend_detected_via": backend.detected_via if backend else None,
                 "status": "failed",
                 "error": str(exc),
                 "error_type": type(exc).__name__,
@@ -1792,7 +2173,9 @@ def main() -> int:
             "failed": failures,
             "succeeded": len(results) - failures,
             "format": args.format,
-            "backend": backend.name,
+            "backend": "mixed" if len({result.get("backend") for result in results}) > 1 else (
+                results[0].get("backend") if results else None
+            ),
         },
     }
 

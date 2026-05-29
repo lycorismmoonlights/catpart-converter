@@ -5,6 +5,7 @@
 The plugin itself does not reverse-engineer CATPart directly. Instead, it wraps a locally installed converter backend and gives you one stable CLI:
 
 - Recommended readable output: `STEP` (`.step` / `.stp`)
+- Local `STEP` conversion: existing `.step` / `.stp` files can be converted with `FreeCAD` without a CATPart-specific backend
 - Mesh outputs: `OBJ`, `STL`, `GLTF`, `GLB`
 - Exchange outputs: `IGES`, `BREP`, `X_T`, `X_B`
 
@@ -17,6 +18,8 @@ After conversion, the script now inspects supported outputs automatically:
 - `STL`: triangle count, encoding type, area, watertight volume, centroids, exact bounding box
 
 Exact `FreeCAD` reports also include per-solid details, shell counts, static moments, inertia matrices, and principal inertia properties when the imported shape exposes them.
+
+`STEP` text analysis also scans parameter values broadly. It reports counts and ranges for integers, real numbers, scientific notation, signed values, logical values (`.T.`, `.F.`, `.U.`), enumerations, entity references, strings, omitted values (`$`), and derived values (`*`).
 
 ## Why `STEP`
 
@@ -57,6 +60,19 @@ python3 scripts/convert_catpart.py \
   --format obj \
   --output-dir /path/to/output
 ```
+
+Convert an existing STEP file locally with FreeCAD:
+
+```bash
+python3 scripts/convert_catpart.py \
+  /path/to/model.step \
+  --source-format step \
+  --format brep \
+  --output /path/to/model.brep \
+  --report /path/to/model.step-conversion.json
+```
+
+When `--backend auto` is used, `.step`, `.stp`, `.brep`, `.iges`, and `.igs` inputs automatically use the local FreeCAD conversion path for supported targets: `STEP`, `BREP`, `IGES`, `STL`, and `OBJ`.
 
 Analyze an existing exported file without re-running conversion:
 
@@ -111,6 +127,12 @@ You can configure the backend with environment variables:
 
 - `CATPART_DETAIL_LIMIT`
   Optional maximum number of solids and shells included in detailed exact-geometry output. Defaults to `100`.
+
+- `CATPART_MESH_LINEAR_DEFLECTION`
+  Optional linear deflection for local FreeCAD mesh exports such as `OBJ`. Defaults to `0.1`.
+
+- `CATPART_MESH_ANGULAR_DEFLECTION`
+  Optional angular deflection for local FreeCAD mesh exports such as `OBJ`. Defaults to `0.5`.
 
 Example:
 

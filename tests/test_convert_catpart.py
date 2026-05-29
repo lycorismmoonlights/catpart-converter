@@ -74,6 +74,29 @@ class ConvertCatpartTests(unittest.TestCase):
         self.assertTrue(scaled["inferred"])
         self.assertEqual(scaled["size"], [25.4, 50.8, 76.2])
 
+    def test_summarize_step_values_covers_common_value_types(self) -> None:
+        text = (
+            "#1=EXAMPLE(42,-7,3.5,.25,1.E-3,.T.,.F.,.U.,.ENUM.,$,*,'a''b',#2);"
+        )
+
+        summary = convert_catpart.summarize_step_values(text)
+        counts = summary["value_type_counts"]
+        numeric = summary["numeric"]
+
+        self.assertEqual(numeric["integer_count"], 2)
+        self.assertEqual(numeric["real_count"], 3)
+        self.assertEqual(numeric["exponential_count"], 1)
+        self.assertEqual(numeric["min"], -7.0)
+        self.assertEqual(numeric["max"], 42.0)
+        self.assertEqual(counts["logical_true"], 1)
+        self.assertEqual(counts["logical_false"], 1)
+        self.assertEqual(counts["logical_unknown"], 1)
+        self.assertEqual(counts["enumeration"], 1)
+        self.assertEqual(counts["omitted"], 1)
+        self.assertEqual(counts["derived"], 1)
+        self.assertEqual(counts["string"], 1)
+        self.assertEqual(counts["entity_reference"], 2)
+
     def test_analyze_obj_file_skips_invalid_faces_instead_of_crashing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             obj_path = Path(temp_dir) / "bad.obj"
@@ -112,6 +135,33 @@ class ConvertCatpartTests(unittest.TestCase):
                 )
 
             self.assertTrue(input_path.exists())
+
+    def test_local_step_conversion_to_brep_with_freecad_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            step_path = self.export_box_with_freecad(
+                temp_path,
+                "box.step",
+                ["Part.export([box], output_path)"],
+            )
+            output_path = temp_path / "box.brep"
+
+            result = convert_catpart.convert_one_with_freecad(
+                input_path=step_path,
+                output_path=output_path,
+                output_format="brep",
+                source_format="step",
+                overwrite=False,
+                dry_run=False,
+                analyze=True,
+                assume_unit="mm",
+            )
+
+        self.assertEqual(result["status"], "converted")
+        self.assertEqual(result["backend"], "freecad")
+        self.assertEqual(result["analysis"]["kind"], "brep")
+        self.assertEqual(result["analysis"]["enclosed_volume"], 6000.0)
+        self.assertEqual(result["analysis"]["surface_area"], 2200.0)
 
     def test_analyze_brep_file_with_freecad_when_available(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
