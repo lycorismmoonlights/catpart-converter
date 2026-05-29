@@ -41,6 +41,8 @@ python3 scripts/convert_catpart.py --probe
 
 If `freecadcmd` is available locally, `--probe` will also report that exact `STEP`, `BREP`, and `IGES` geometry analysis is enabled.
 
+When no CATPart-capable converter is configured, `--probe` and failed conversion reports include a `diagnostics` object. That object separates the missing native CATPart import capability from the local FreeCAD capabilities that are still available for existing `STEP`, `BREP`, `IGES`, `OBJ`, and `STL` files, and it lists the environment variables needed to attach an external backend.
+
 Convert a file to STEP:
 
 ```bash
@@ -151,6 +153,7 @@ python3 scripts/convert_catpart.py /path/to/part.CATPart
 
 - Add this folder to your Codex local plugin path or marketplace as needed.
 - If no backend is installed, the script exits with a clear setup message instead of failing silently.
+- Missing CATPart backends are reported with structured diagnostics, including current FreeCAD capabilities, supported local exchange formats, example external backends, and `CATPART_CONVERTER_BIN` / `CATPART_CONVERTER_TEMPLATE` setup hints.
 - `--probe` now reports both conversion backend availability and local analysis capabilities.
 - `freecadcmd` is auto-detected from `PATH`, common app paths, and common conda environment locations such as `/opt/anaconda3/envs/*/bin/freecadcmd`.
 - For multi-file use, pass multiple input files and an `--output-dir`.

@@ -35,6 +35,7 @@ python3 plugins/catpart-converter/scripts/convert_catpart.py "<input.CATPart>" -
 5. For `STEP`, prefer the generated engineering summary first. It combines textual metadata, broad value-type scanning, and exact `FreeCAD` geometry measurements when `freecadcmd` is available.
 6. For existing `BREP` or `IGES` files, use `--analysis-only` to get exact topology, area, volume, center of gravity, and bounding box measurements.
 7. If the backend is missing for `.CATPart`, explain that the plugin is installed but still needs an external CATIA-capable converter backend.
+8. When a report contains `diagnostics`, use it to distinguish missing native CATPart conversion from available local FreeCAD analysis/conversion of existing exchange files.
 
 ## Backend setup
 
@@ -56,6 +57,8 @@ You can probe the environment with:
 ```bash
 python3 plugins/catpart-converter/scripts/convert_catpart.py --probe
 ```
+
+If no CATPart-capable backend is found, `--probe` returns structured diagnostics with current FreeCAD capabilities, required backend examples, and the exact environment variables to configure.
 
 ## Output guidance
 

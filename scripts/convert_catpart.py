@@ -1649,6 +1649,66 @@ def discover_exact_geometry_backend() -> dict[str, Any]:
     }
 
 
+def catpart_backend_diagnostics(
+    exact_geometry_backend: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if exact_geometry_backend is None:
+        exact_geometry_backend = discover_exact_geometry_backend()
+
+    freecad_cmd = exact_geometry_backend.get("freecad_cmd") or {}
+    freecad_convert_script = exact_geometry_backend.get("freecad_convert_script") or {}
+    local_freecad_conversion = bool(
+        freecad_cmd.get("available") and freecad_convert_script.get("available")
+    )
+
+    return {
+        "missing_capability": "CATPart import/conversion",
+        "catpart_conversion_available": False,
+        "why": (
+            "CATPart is a proprietary CATIA format. This machine has local FreeCAD "
+            "support for existing exchange files, but no CATPart-capable import backend "
+            "was detected."
+        ),
+        "local_capabilities_available": {
+            "freecad_cmd": freecad_cmd,
+            "step_brep_iges_exact_analysis": bool(
+                exact_geometry_backend.get("exact_step_geometry_with_freecad")
+                and exact_geometry_backend.get("exact_brep_geometry_with_freecad")
+                and exact_geometry_backend.get("exact_iges_geometry_with_freecad")
+            ),
+            "local_exchange_conversion_with_freecad": local_freecad_conversion,
+            "local_exchange_input_formats": list(
+                freecad_convert_script.get("input_formats")
+                or sorted(FREECAD_CONVERT_INPUT_FORMATS)
+            ),
+            "local_exchange_output_formats": list(
+                freecad_convert_script.get("output_formats")
+                or sorted(FREECAD_CONVERT_OUTPUT_FORMATS)
+            ),
+        },
+        "required_external_backend_examples": [
+            "CAD Exchanger Batch / ExchangerConv",
+            "CATIA V5 automation or batch export",
+            "Any local converter callable with {input} and {output}",
+        ],
+        "configuration": {
+            "CATPART_CONVERTER_BIN": "Absolute path to a CATPart-capable converter executable.",
+            "CATPART_CONVERTER_TEMPLATE": (
+                'Command template, for example: "{executable}" -i "{input}" -e "{output}"'
+            ),
+        },
+        "example_commands": [
+            'export CATPART_CONVERTER_BIN="/absolute/path/to/ExchangerConv"',
+            'export CATPART_CONVERTER_TEMPLATE=\'"{executable}" -i "{input}" -e "{output}"\'',
+        ],
+        "current_limitation": (
+            "Without a CATPart-capable backend, this plugin can analyze existing STEP, "
+            "BREP, IGES, OBJ, and STL files, and can locally convert exchange files "
+            "through FreeCAD, but it cannot export native .CATPart to STEP."
+        ),
+    }
+
+
 def probe_environment(args: argparse.Namespace) -> dict[str, Any]:
     exact_geometry_backend = discover_exact_geometry_backend()
     try:
@@ -1657,6 +1717,7 @@ def probe_environment(args: argparse.Namespace) -> dict[str, Any]:
         conversion_backend = {
             "available": False,
             "error": str(exc),
+            "diagnostics": catpart_backend_diagnostics(exact_geometry_backend),
         }
     else:
         conversion_backend = {
@@ -2158,6 +2219,8 @@ def main() -> int:
                 "error": str(exc),
                 "error_type": type(exc).__name__,
             }
+            if isinstance(exc, BackendNotFoundError):
+                result["diagnostics"] = catpart_backend_diagnostics()
 
         results.append(result)
         status = result["status"]

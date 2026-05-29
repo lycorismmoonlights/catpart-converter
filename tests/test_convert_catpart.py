@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import math
 import os
@@ -107,6 +108,30 @@ class ConvertCatpartTests(unittest.TestCase):
         self.assertEqual(summary["numeric"]["total_count"], 1)
         self.assertEqual(summary["numeric"]["min"], 2.0)
         self.assertEqual(summary["numeric"]["max"], 2.0)
+
+    def test_probe_includes_catpart_backend_diagnostics_when_missing(self) -> None:
+        args = argparse.Namespace(
+            backend="auto",
+            backend_executable=None,
+            backend_cmd=None,
+        )
+
+        payload = convert_catpart.probe_environment(args)
+        conversion_backend = payload["conversion_backend"]
+        if conversion_backend["available"]:
+            self.skipTest("A CATPart conversion backend is configured on this machine")
+
+        diagnostics = conversion_backend["diagnostics"]
+
+        self.assertEqual(diagnostics["missing_capability"], "CATPart import/conversion")
+        self.assertFalse(diagnostics["catpart_conversion_available"])
+        self.assertIn("CATPART_CONVERTER_BIN", diagnostics["configuration"])
+        self.assertIn("CATPART_CONVERTER_TEMPLATE", diagnostics["configuration"])
+        self.assertIn(
+            "step",
+            diagnostics["local_capabilities_available"]["local_exchange_output_formats"],
+        )
+        self.assertIn("current_limitation", diagnostics)
 
     def test_analyze_obj_file_skips_invalid_faces_instead_of_crashing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
