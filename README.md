@@ -5,6 +5,7 @@
 The plugin itself does not reverse-engineer CATPart directly. Instead, it wraps a locally installed converter backend and gives you one stable CLI:
 
 - Recommended readable output: `STEP` (`.step` / `.stp`)
+- Native CATIA path: if CATIA V5 `catstart` is installed, `--backend catia` can run a generated CATScript to export `.CATPart` and collect native `Product.Analyze` mass properties
 - Local `STEP` conversion: existing `.step` / `.stp` files can be converted with `FreeCAD` without a CATPart-specific backend
 - Mesh outputs: `OBJ`, `STL`, `GLTF`, `GLB`
 - Exchange outputs: `IGES`, `BREP`, `X_T`, `X_B`
@@ -18,6 +19,8 @@ After conversion, the script now inspects supported outputs automatically:
 - `STL`: triangle count, encoding type, area, watertight volume, centroids, exact bounding box
 
 Exact `FreeCAD` reports also include per-solid details, shell counts, static moments, inertia matrices, and principal inertia properties when the imported shape exposes them.
+
+When the CATIA V5 batch backend is available, conversion reports can also include `native_catia_analysis` from CATIA's own `Product.Analyze` object: mass, volume, wet area, gravity center, and inertia matrix. This requires CATIA to open the source file in design mode and have the relevant export/analysis licenses.
 
 `STEP` text analysis also scans parameter values broadly. It reports counts and ranges for integers, real numbers, scientific notation, signed values, logical values (`.T.`, `.F.`, `.U.`), enumerations, entity references, strings, omitted values (`$`), and derived values (`*`).
 
@@ -76,6 +79,24 @@ python3 scripts/convert_catpart.py \
 
 When `--backend auto` is used, `.step`, `.stp`, `.brep`, `.iges`, and `.igs` inputs automatically use the local FreeCAD conversion path for supported targets: `STEP`, `BREP`, `IGES`, `STL`, and `OBJ`.
 
+Use CATIA V5 batch mode when `catstart` is available:
+
+```bash
+export CATPART_CATIA_CATSTART_BIN="/path/to/DassaultSystemes/Bxx/code/command/catstart"
+python3 scripts/convert_catpart.py \
+  /path/to/part.CATPart \
+  --backend catia \
+  --format step \
+  --report /path/to/part.catia-conversion.json
+```
+
+Optional CATIA environment settings:
+
+```bash
+export CATPART_CATIA_ENV="CATIA.V5Rxx"
+export CATPART_CATIA_DIRENV="/path/to/CATEnv"
+```
+
 Analyze an existing exported file without re-running conversion:
 
 ```bash
@@ -124,6 +145,18 @@ You can configure the backend with environment variables:
 - `CATPART_FREECAD_CMD`
   Optional absolute path to `freecadcmd` or `FreeCADCmd` for exact `STEP` geometry analysis.
 
+- `CATPART_CATIA_CATSTART_BIN`
+  Optional absolute path to CATIA V5 `catstart`. Enables `--backend catia` for native CATPart opening, STEP/IGES/STL export, and CATIA `Product.Analyze` mass-property extraction.
+
+- `CATPART_CATIA_ENV`
+  Optional CATIA environment name passed to `catstart -env`.
+
+- `CATPART_CATIA_DIRENV`
+  Optional CATIA environment directory passed to `catstart -direnv`.
+
+- `CATPART_CATIA_TIMEOUT_SECONDS`
+  Optional timeout for CATIA batch conversion. Defaults to `300` seconds.
+
 - `CATPART_FREECAD_TIMEOUT_SECONDS`
   Optional timeout for `FreeCAD` exact geometry analysis. Defaults to `45` seconds.
 
@@ -154,6 +187,7 @@ python3 scripts/convert_catpart.py /path/to/part.CATPart
 - Add this folder to your Codex local plugin path or marketplace as needed.
 - If no backend is installed, the script exits with a clear setup message instead of failing silently.
 - Missing CATPart backends are reported with structured diagnostics, including current FreeCAD capabilities, supported local exchange formats, example external backends, and `CATPART_CONVERTER_BIN` / `CATPART_CONVERTER_TEMPLATE` setup hints.
+- `--backend catia` uses CATIA V5 batch automation through `catstart -run "CNEXT -batch -macro ..."`. It is the preferred path for native CATPart mass/volume when CATIA and the needed licenses are installed locally.
 - `--probe` now reports both conversion backend availability and local analysis capabilities.
 - `freecadcmd` is auto-detected from `PATH`, common app paths, and common conda environment locations such as `/opt/anaconda3/envs/*/bin/freecadcmd`.
 - For multi-file use, pass multiple input files and an `--output-dir`.

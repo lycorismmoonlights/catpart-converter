@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import struct
 import sys
+import tempfile
 import time
 from collections import Counter
 from dataclasses import dataclass
@@ -47,6 +48,13 @@ SOURCE_FORMATS = {
 ANALYSIS_FORMATS = {"step", "stp", "obj", "stl", "brep", "brp", "iges", "igs"}
 FREECAD_CONVERT_INPUT_FORMATS = {"step", "stp", "brep", "brp", "iges", "igs"}
 FREECAD_CONVERT_OUTPUT_FORMATS = {"step", "stp", "brep", "brp", "iges", "igs", "stl", "obj"}
+CATIA_EXPORT_FORMATS = {
+    "step": "stp",
+    "stp": "stp",
+    "iges": "igs",
+    "igs": "igs",
+    "stl": "stl",
+}
 
 CAD_EXCHANGER_EXECUTABLES = [
     "ExchangerConv",
@@ -56,6 +64,15 @@ CAD_EXCHANGER_EXECUTABLES = [
 
 CAD_EXCHANGER_PATHS = [
     "/Applications/CAD Exchanger Lab.app/Contents/MacOS/ExchangerConv",
+]
+CATIA_CATSTART_EXECUTABLES = [
+    "catstart",
+    "CATSTART",
+]
+CATIA_CATSTART_PATHS = [
+    "/opt/DassaultSystemes/B*/code/command/catstart",
+    "/usr/DassaultSystemes/B*/code/command/catstart",
+    "C:/Program Files/Dassault Systemes/B*/win_b64/code/bin/catstart.exe",
 ]
 FREECAD_EXECUTABLES = [
     "FreeCADCmd",
@@ -84,6 +101,7 @@ FREECAD_MEASURE_SCRIPT = Path(__file__).with_name("freecad_measure_step.py")
 FREECAD_CONVERT_SCRIPT = Path(__file__).with_name("freecad_convert.py")
 DEFAULT_FREECAD_TIMEOUT_SECONDS = 45.0
 DEFAULT_DETAIL_LIMIT = 100
+DEFAULT_CATIA_TIMEOUT_SECONDS = 300.0
 LENGTH_UNIT_TO_MM = {
     "um": 0.001,
     "mm": 1.0,
@@ -134,6 +152,7 @@ LENGTH_UNIT_ALIASES = {
 }
 
 CAD_EXCHANGER_TEMPLATE = '"{executable}" -i "{input}" -e "{output}"'
+CATIA_BATCH_TEMPLATE = '"{executable}" -run "CNEXT -batch -macro {macro}"'
 FLOAT_RE = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[Ee][-+]?\d+)?")
 STEP_NUMBER_START_RE = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?")
 STEP_ENTITY_RE = re.compile(r"#\d+\s*=\s*([A-Z0-9_]+)\s*\(")
@@ -216,7 +235,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--backend",
-        choices=("auto", "cadexchanger", "custom"),
+        choices=("auto", "cadexchanger", "catia", "custom"),
         default="auto",
         help="Backend selection strategy (default: auto)",
     )
@@ -400,6 +419,17 @@ def detail_limit() -> int:
     except ValueError:
         return DEFAULT_DETAIL_LIMIT
     return max(0, parsed)
+
+
+def catia_timeout_seconds() -> float:
+    raw_value = os.environ.get("CATPART_CATIA_TIMEOUT_SECONDS")
+    if raw_value is None:
+        return DEFAULT_CATIA_TIMEOUT_SECONDS
+    try:
+        parsed = float(raw_value)
+    except ValueError:
+        return DEFAULT_CATIA_TIMEOUT_SECONDS
+    return parsed if parsed > 0 else DEFAULT_CATIA_TIMEOUT_SECONDS
 
 
 def parse_float_triplet(raw_values: str) -> tuple[float, float, float] | None:
@@ -1649,11 +1679,49 @@ def discover_exact_geometry_backend() -> dict[str, Any]:
     }
 
 
+def discover_catia_batch_backend() -> dict[str, Any]:
+    env_executable = os.environ.get("CATPART_CATIA_CATSTART_BIN")
+    discovered: tuple[str, str] | None = None
+    if env_executable:
+        discovered = (normalize_path(env_executable), "ENV:CATPART_CATIA_CATSTART_BIN")
+    else:
+        discovered = discover_executable(CATIA_CATSTART_EXECUTABLES, CATIA_CATSTART_PATHS)
+
+    return {
+        "available": discovered is not None,
+        "name": "catia_v5_batch" if discovered else None,
+        "executable": discovered[0] if discovered else None,
+        "detected_via": discovered[1] if discovered else None,
+        "template": CATIA_BATCH_TEMPLATE if discovered else None,
+        "supported_output_formats": sorted(CATIA_EXPORT_FORMATS),
+        "native_properties": [
+            "mass",
+            "volume",
+            "wet_area",
+            "gravity_center",
+            "inertia_matrix",
+        ],
+        "requires": [
+            "Installed CATIA V5",
+            "A license that can open the CATPart release",
+            "STEP/IGES/STL export license for the requested output format",
+            "Space Analysis/Product Analyze access for native mass properties",
+        ],
+        "environment": {
+            "CATPART_CATIA_CATSTART_BIN": env_executable,
+            "CATPART_CATIA_ENV": os.environ.get("CATPART_CATIA_ENV"),
+            "CATPART_CATIA_DIRENV": os.environ.get("CATPART_CATIA_DIRENV"),
+            "CATPART_CATIA_TIMEOUT_SECONDS": catia_timeout_seconds(),
+        },
+    }
+
+
 def catpart_backend_diagnostics(
     exact_geometry_backend: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if exact_geometry_backend is None:
         exact_geometry_backend = discover_exact_geometry_backend()
+    catia_batch_backend = discover_catia_batch_backend()
 
     freecad_cmd = exact_geometry_backend.get("freecad_cmd") or {}
     freecad_convert_script = exact_geometry_backend.get("freecad_convert_script") or {}
@@ -1688,18 +1756,24 @@ def catpart_backend_diagnostics(
         },
         "required_external_backend_examples": [
             "CAD Exchanger Batch / ExchangerConv",
-            "CATIA V5 automation or batch export",
+            "CATIA V5 batch export through catstart/CNEXT/CATScript",
             "Any local converter callable with {input} and {output}",
         ],
+        "catia_batch_backend": catia_batch_backend,
         "configuration": {
             "CATPART_CONVERTER_BIN": "Absolute path to a CATPart-capable converter executable.",
             "CATPART_CONVERTER_TEMPLATE": (
                 'Command template, for example: "{executable}" -i "{input}" -e "{output}"'
             ),
+            "CATPART_CATIA_CATSTART_BIN": "Absolute path to CATIA V5 catstart for the built-in --backend catia path.",
+            "CATPART_CATIA_ENV": "Optional CATIA environment name passed to catstart -env.",
+            "CATPART_CATIA_DIRENV": "Optional CATIA environment directory passed to catstart -direnv.",
         },
         "example_commands": [
             'export CATPART_CONVERTER_BIN="/absolute/path/to/ExchangerConv"',
             'export CATPART_CONVERTER_TEMPLATE=\'"{executable}" -i "{input}" -e "{output}"\'',
+            'export CATPART_CATIA_CATSTART_BIN="/path/to/DassaultSystemes/Bxx/code/command/catstart"',
+            'python3 scripts/convert_catpart.py part.CATPart --backend catia --format step',
         ],
         "current_limitation": (
             "Without a CATPart-capable backend, this plugin can analyze existing STEP, "
@@ -1711,6 +1785,7 @@ def catpart_backend_diagnostics(
 
 def probe_environment(args: argparse.Namespace) -> dict[str, Any]:
     exact_geometry_backend = discover_exact_geometry_backend()
+    catia_batch_backend = discover_catia_batch_backend()
     try:
         backend = resolve_backend(args)
     except BackendNotFoundError as exc:
@@ -1752,6 +1827,8 @@ def probe_environment(args: argparse.Namespace) -> dict[str, Any]:
             ),
             "local_step_conversion_outputs": sorted(FREECAD_CONVERT_OUTPUT_FORMATS),
             "exact_brep_backend": exact_geometry_backend,
+            "native_catpart_with_catia_batch": catia_batch_backend["available"],
+            "catia_batch_backend": catia_batch_backend,
         },
     }
 
@@ -1768,9 +1845,16 @@ def discover_executable(candidate_names: list[str], extra_paths: list[str]) -> t
             return resolved, f"PATH:{candidate}"
 
     for candidate in extra_paths:
-        path = Path(candidate).expanduser()
-        if path.exists():
-            return str(path.resolve()), f"KNOWN_PATH:{path}"
+        expanded_candidate = str(Path(candidate).expanduser())
+        matches = (
+            glob.glob(expanded_candidate)
+            if any(token in expanded_candidate for token in "*?[")
+            else [expanded_candidate]
+        )
+        for match in sorted(matches):
+            path = Path(match).expanduser()
+            if path.exists():
+                return str(path.resolve()), f"KNOWN_PATH:{path}"
 
     return None
 
@@ -1802,6 +1886,30 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
             detected_via="ENV_OR_CLI_TEMPLATE",
         )
 
+    if args.backend in {"auto", "catia"} and not executable_override and not template_override:
+        catia_backend = discover_catia_batch_backend()
+        if catia_backend["available"]:
+            return BackendSpec(
+                name="catia_v5",
+                executable=str(catia_backend["executable"]),
+                template=CATIA_BATCH_TEMPLATE,
+                detected_via=str(catia_backend["detected_via"]),
+            )
+
+    if args.backend == "catia":
+        catstart_executable = args.backend_executable or os.environ.get("CATPART_CATIA_CATSTART_BIN")
+        if not catstart_executable:
+            raise BackendNotFoundError(
+                "CATIA backend requested but catstart was not found. "
+                "Set --backend-executable or CATPART_CATIA_CATSTART_BIN."
+            )
+        return BackendSpec(
+            name="catia_v5",
+            executable=normalize_path(catstart_executable),
+            template=CATIA_BATCH_TEMPLATE,
+            detected_via="CLI_OR_ENV_CATIA_CATSTART",
+        )
+
     if args.backend in {"auto", "cadexchanger"}:
         if executable_override:
             executable = normalize_path(executable_override)
@@ -1827,12 +1935,13 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
         "This plugin wraps an external CATIA-capable converter because CATPart is a "
         "proprietary format.\n\n"
         "Recommended setup:\n"
-        "1. Install a converter backend such as CAD Exchanger Batch.\n"
-        "2. Set CATPART_CONVERTER_BIN to the executable path.\n"
+        "1. Install a converter backend such as CAD Exchanger Batch, or use CATIA V5 batch mode.\n"
+        "2. Set CATPART_CONVERTER_BIN to a converter executable, or CATPART_CATIA_CATSTART_BIN to CATIA catstart.\n"
         "3. Optionally set CATPART_CONVERTER_TEMPLATE if your converter uses different flags.\n\n"
         "Example:\n"
         '  export CATPART_CONVERTER_BIN="/absolute/path/to/ExchangerConv"\n'
-        '  export CATPART_CONVERTER_TEMPLATE=\'"{executable}" -i "{input}" -e "{output}"\''
+        '  export CATPART_CONVERTER_TEMPLATE=\'"{executable}" -i "{input}" -e "{output}"\'\n'
+        '  export CATPART_CATIA_CATSTART_BIN="/path/to/DassaultSystemes/Bxx/code/command/catstart"'
     )
 
 
@@ -1917,6 +2026,347 @@ def write_report(report_path: str, payload: dict[str, Any]) -> None:
         handle.write("\n")
 
     print(f"Wrote report: {destination}")
+
+
+def vb_string_literal(value: str | Path) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def catia_export_base_path(output_path: Path) -> Path:
+    return output_path.with_suffix("")
+
+
+def catia_created_output_path(output_path: Path, export_format: str) -> Path:
+    return output_path.with_suffix(f".{export_format}")
+
+
+def render_catia_batch_macro(
+    *,
+    input_path: Path,
+    output_path: Path,
+    native_report_path: Path,
+    export_format: str,
+) -> str:
+    export_base_path = catia_export_base_path(output_path)
+    return f'''Sub CATMain()
+    On Error Resume Next
+
+    Dim inputPath
+    Dim outputPath
+    Dim exportBasePath
+    Dim nativeReportPath
+    Dim exportFormat
+    inputPath = {vb_string_literal(input_path)}
+    outputPath = {vb_string_literal(output_path)}
+    exportBasePath = {vb_string_literal(export_base_path)}
+    nativeReportPath = {vb_string_literal(native_report_path)}
+    exportFormat = {vb_string_literal(export_format)}
+
+    CATIA.DisplayFileAlerts = False
+
+    Dim doc
+    Set doc = CATIA.Documents.Open(inputPath)
+    If Err.Number <> 0 Then
+        WriteNativeReport nativeReportPath, "failed", "open_failed", Err.Description, "", "", "", "", "", ""
+        Exit Sub
+    End If
+    Err.Clear
+
+    Dim product
+    Set product = Nothing
+    Set product = doc.Product
+    If Err.Number <> 0 Then
+        Err.Clear
+        Set product = Nothing
+    End If
+
+    Dim mass
+    Dim volume
+    Dim wetArea
+    Dim gravityCenter
+    Dim inertiaMatrix
+    mass = ""
+    volume = ""
+    wetArea = ""
+    gravityCenter = ""
+    inertiaMatrix = ""
+
+    If Not product Is Nothing Then
+        Dim analyze
+        Set analyze = product.Analyze
+        If Err.Number = 0 Then
+            mass = CStr(analyze.Mass)
+            volume = CStr(analyze.Volume)
+            wetArea = CStr(analyze.WetArea)
+
+            Dim cog(2)
+            analyze.GetGravityCenter cog
+            If Err.Number = 0 Then
+                gravityCenter = CStr(cog(0)) & ";" & CStr(cog(1)) & ";" & CStr(cog(2))
+            End If
+            Err.Clear
+
+            Dim inertia(8)
+            analyze.GetInertia inertia
+            If Err.Number = 0 Then
+                inertiaMatrix = CStr(inertia(0)) & ";" & CStr(inertia(1)) & ";" & CStr(inertia(2)) & ";" & CStr(inertia(3)) & ";" & CStr(inertia(4)) & ";" & CStr(inertia(5)) & ";" & CStr(inertia(6)) & ";" & CStr(inertia(7)) & ";" & CStr(inertia(8))
+            End If
+            Err.Clear
+        Else
+            Err.Clear
+        End If
+    End If
+
+    doc.ExportData exportBasePath, exportFormat
+    If Err.Number <> 0 Then
+        WriteNativeReport nativeReportPath, "failed", "export_failed", Err.Description, mass, volume, wetArea, gravityCenter, inertiaMatrix, outputPath
+        doc.Close
+        Exit Sub
+    End If
+    Err.Clear
+
+    doc.Close
+    WriteNativeReport nativeReportPath, "converted", "", "", mass, volume, wetArea, gravityCenter, inertiaMatrix, outputPath
+End Sub
+
+Sub WriteNativeReport(reportPath, statusValue, errorType, errorMessage, mass, volume, wetArea, gravityCenter, inertiaMatrix, outputPath)
+    On Error Resume Next
+    Dim fileSystem
+    Dim textFile
+    Set fileSystem = CreateObject("Scripting.FileSystemObject")
+    Set textFile = fileSystem.CreateTextFile(reportPath, True)
+    textFile.WriteLine "status=" & statusValue
+    textFile.WriteLine "error_type=" & errorType
+    textFile.WriteLine "error_message=" & Replace(errorMessage, vbCrLf, " ")
+    textFile.WriteLine "output=" & outputPath
+    textFile.WriteLine "mass=" & mass
+    textFile.WriteLine "volume=" & volume
+    textFile.WriteLine "wet_area=" & wetArea
+    textFile.WriteLine "gravity_center=" & gravityCenter
+    textFile.WriteLine "inertia_matrix=" & inertiaMatrix
+    textFile.WriteLine "source=CATIA Product.Analyze"
+    textFile.Close
+End Sub
+'''
+
+
+def build_catia_batch_command(catstart_executable: str, macro_path: Path) -> list[str]:
+    command = [catstart_executable]
+    env_name = os.environ.get("CATPART_CATIA_ENV")
+    direnv = os.environ.get("CATPART_CATIA_DIRENV")
+    if env_name:
+        command.extend(["-env", env_name])
+    if direnv:
+        command.extend(["-direnv", direnv])
+    command.extend(["-run", f'CNEXT -batch -macro "{macro_path}"'])
+    return command
+
+
+def parse_catia_float(value: str) -> float | None:
+    stripped = value.strip()
+    if not stripped:
+        return None
+    if "," in stripped and "." not in stripped:
+        stripped = stripped.replace(",", ".")
+    try:
+        return float(stripped)
+    except ValueError:
+        return None
+
+
+def parse_catia_float_array(value: str) -> list[float] | None:
+    if not value.strip():
+        return None
+    parsed = [parse_catia_float(item) for item in value.split(";")]
+    if any(item is None for item in parsed):
+        return None
+    return [round_number(item) for item in parsed if item is not None]
+
+
+def parse_catia_native_report(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+
+    raw: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        raw[key.strip()] = value.strip()
+
+    native: dict[str, Any] = {
+        "kind": "catia_native",
+        "status": raw.get("status"),
+        "source": raw.get("source") or "CATIA Product.Analyze",
+        "unit_notes": {
+            "mass": "CATIA Product.Analyze mass value",
+            "volume": "CATIA Product.Analyze volume value",
+            "wet_area": "CATIA Product.Analyze wet area value",
+            "gravity_center": "CATIA Product.Analyze gravity center coordinates",
+            "inertia_matrix": "CATIA Product.Analyze inertia matrix",
+        },
+        "raw_report": raw,
+    }
+
+    numeric_fields = {
+        "mass": "mass",
+        "volume": "volume",
+        "wet_area": "wet_area",
+    }
+    for raw_key, output_key in numeric_fields.items():
+        parsed = parse_catia_float(raw.get(raw_key, ""))
+        if parsed is not None:
+            native[output_key] = round_number(parsed)
+
+    gravity_center = parse_catia_float_array(raw.get("gravity_center", ""))
+    if gravity_center is not None:
+        native["gravity_center"] = gravity_center
+
+    inertia_matrix = parse_catia_float_array(raw.get("inertia_matrix", ""))
+    if inertia_matrix is not None:
+        native["inertia_matrix"] = inertia_matrix
+
+    if raw.get("error_type") or raw.get("error_message"):
+        native["error_type"] = raw.get("error_type")
+        native["error_message"] = raw.get("error_message")
+
+    return native
+
+
+def convert_one_with_catia(
+    backend: BackendSpec,
+    input_path: Path,
+    output_path: Path,
+    output_format: str,
+    overwrite: bool,
+    dry_run: bool,
+    analyze: bool,
+    assume_unit: str | None,
+) -> dict[str, Any]:
+    started_at = time.time()
+    source_sha256 = sha256_of(input_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if input_path == output_path:
+        raise FileExistsError(
+            f"Output path resolves to the source file: {output_path}. Choose a different output path."
+        )
+
+    export_format = CATIA_EXPORT_FORMATS.get(output_format)
+    if export_format is None:
+        raise ValueError(
+            f"CATIA batch backend does not support target format '{output_format}'. "
+            f"Supported targets: {', '.join(sorted(CATIA_EXPORT_FORMATS))}."
+        )
+
+    native_report_path = output_path.with_suffix(output_path.suffix + ".catia-native.txt")
+    macro_handle = tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        delete=False,
+        suffix=".CATScript",
+        prefix="catpart_export_",
+    )
+    macro_path = Path(macro_handle.name)
+    with macro_handle:
+        macro_handle.write(
+            render_catia_batch_macro(
+                input_path=input_path,
+                output_path=output_path,
+                native_report_path=native_report_path,
+                export_format=export_format,
+            )
+        )
+
+    command = build_catia_batch_command(backend.executable, macro_path)
+    result: dict[str, Any] = {
+        "source": str(input_path),
+        "source_format": "catpart",
+        "output": str(output_path),
+        "format": output_format,
+        "backend": backend.name,
+        "backend_detected_via": backend.detected_via,
+        "command": command,
+        "status": "dry_run" if dry_run else "pending",
+        "started_at_epoch": started_at,
+        "source_sha256": source_sha256,
+        "catia_macro_path": str(macro_path),
+        "catia_native_report": str(native_report_path),
+        "catia_export_format": export_format,
+    }
+
+    expected_catia_output_path = catia_created_output_path(output_path, export_format)
+    output_candidates = {output_path, expected_catia_output_path}
+    existing_outputs = [path for path in output_candidates if path.exists()]
+    if existing_outputs and not overwrite:
+        raise FileExistsError(
+            "Output already exists: "
+            + ", ".join(str(path) for path in existing_outputs)
+            + ". Re-run with --overwrite to replace it."
+        )
+
+    if dry_run:
+        result["duration_seconds"] = 0.0
+        return result
+
+    for candidate in existing_outputs:
+        candidate.unlink()
+    if native_report_path.exists() and overwrite:
+        native_report_path.unlink()
+
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=catia_timeout_seconds(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        result["status"] = "failed"
+        result["error"] = f"CATIA batch conversion timed out after {catia_timeout_seconds()} seconds."
+        result["error_type"] = type(exc).__name__
+        result["stdout"] = exc.stdout
+        result["stderr"] = exc.stderr
+        result["duration_seconds"] = round(time.time() - started_at, 3)
+        return result
+
+    result["returncode"] = completed.returncode
+    result["stdout"] = completed.stdout
+    result["stderr"] = completed.stderr
+    result["duration_seconds"] = round(time.time() - started_at, 3)
+
+    native_analysis = parse_catia_native_report(native_report_path)
+    if native_analysis is not None:
+        result["native_catia_analysis"] = native_analysis
+
+    if expected_catia_output_path.exists() and expected_catia_output_path != output_path:
+        expected_catia_output_path.replace(output_path)
+
+    if completed.returncode != 0:
+        result["status"] = "failed"
+        return result
+
+    if not output_path.exists():
+        result["status"] = "failed"
+        result["stderr"] = (
+            (completed.stderr or "")
+            + "\nCATIA batch returned success but no output file was created."
+        ).strip()
+        return result
+
+    result["status"] = "converted"
+    result["output_sha256"] = sha256_of(output_path)
+    result["output_size_bytes"] = output_path.stat().st_size
+    if analyze:
+        try:
+            analysis = analyze_output_file(output_path, output_format, assume_unit=assume_unit)
+        except Exception as exc:  # pragma: no cover - defensive reporting
+            result["analysis_error"] = str(exc)
+        else:
+            if analysis is not None:
+                result["analysis"] = analysis
+    return result
 
 
 def convert_one(
@@ -2196,16 +2646,28 @@ def main() -> int:
             else:
                 if backend is None:
                     backend = resolve_backend(args)
-                result = convert_one(
-                    backend=backend,
-                    input_path=input_path,
-                    output_path=output_path,
-                    output_format=args.format,
-                    overwrite=args.overwrite,
-                    dry_run=args.dry_run,
-                    analyze=not args.skip_analysis,
-                    assume_unit=args.assume_unit,
-                )
+                if backend.name == "catia_v5":
+                    result = convert_one_with_catia(
+                        backend=backend,
+                        input_path=input_path,
+                        output_path=output_path,
+                        output_format=args.format,
+                        overwrite=args.overwrite,
+                        dry_run=args.dry_run,
+                        analyze=not args.skip_analysis,
+                        assume_unit=args.assume_unit,
+                    )
+                else:
+                    result = convert_one(
+                        backend=backend,
+                        input_path=input_path,
+                        output_path=output_path,
+                        output_format=args.format,
+                        overwrite=args.overwrite,
+                        dry_run=args.dry_run,
+                        analyze=not args.skip_analysis,
+                        assume_unit=args.assume_unit,
+                    )
                 result["source_format"] = source_format
         except (BackendNotFoundError, FileExistsError, ValueError) as exc:
             result = {

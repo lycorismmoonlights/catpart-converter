@@ -31,11 +31,19 @@ python3 plugins/catpart-converter/scripts/convert_catpart.py "<input.step>" --so
 python3 plugins/catpart-converter/scripts/convert_catpart.py "<input.CATPart>" --format step
 ```
 
-4. If the conversion succeeds, read the terminal summary or JSON report first.
-5. For `STEP`, prefer the generated engineering summary first. It combines textual metadata, broad value-type scanning, and exact `FreeCAD` geometry measurements when `freecadcmd` is available.
-6. For existing `BREP` or `IGES` files, use `--analysis-only` to get exact topology, area, volume, center of gravity, and bounding box measurements.
-7. If the backend is missing for `.CATPart`, explain that the plugin is installed but still needs an external CATIA-capable converter backend.
-8. When a report contains `diagnostics`, use it to distinguish missing native CATPart conversion from available local FreeCAD analysis/conversion of existing exchange files.
+4. If CATIA V5 `catstart` is available, prefer the native batch backend when exact CATPart mass/volume is important:
+
+```bash
+python3 plugins/catpart-converter/scripts/convert_catpart.py "<input.CATPart>" --backend catia --format step
+```
+
+This backend generates a CATScript, runs `catstart -run "CNEXT -batch -macro ..."`, exports STEP/IGES/STL, and records CATIA `Product.Analyze` mass, volume, wet area, gravity center, and inertia matrix when CATIA exposes them.
+
+5. If the conversion succeeds, read the terminal summary or JSON report first.
+6. For `STEP`, prefer the generated engineering summary first. It combines textual metadata, broad value-type scanning, and exact `FreeCAD` geometry measurements when `freecadcmd` is available.
+7. For existing `BREP` or `IGES` files, use `--analysis-only` to get exact topology, area, volume, center of gravity, and bounding box measurements.
+8. If the backend is missing for `.CATPart`, explain that the plugin is installed but still needs an external CATIA-capable converter backend.
+9. When a report contains `diagnostics`, use it to distinguish missing native CATPart conversion from available local FreeCAD analysis/conversion of existing exchange files.
 
 ## Backend setup
 
@@ -43,7 +51,8 @@ The script will auto-detect a backend in this order:
 
 1. `CATPART_CONVERTER_TEMPLATE`
 2. `CATPART_CONVERTER_BIN`
-3. common `CAD Exchanger` executable names and paths
+3. `CATPART_CATIA_CATSTART_BIN` / common CATIA `catstart` locations
+4. common `CAD Exchanger` executable names and paths
 
 For exact `STEP`, `BREP`, and `IGES` geometry analysis it will also auto-detect `freecadcmd` from:
 

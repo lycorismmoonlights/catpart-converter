@@ -133,6 +133,102 @@ class ConvertCatpartTests(unittest.TestCase):
         )
         self.assertIn("current_limitation", diagnostics)
 
+    def test_resolve_catia_backend_from_env(self) -> None:
+        original = os.environ.get("CATPART_CATIA_CATSTART_BIN")
+        os.environ["CATPART_CATIA_CATSTART_BIN"] = "/bin/echo"
+        try:
+            args = argparse.Namespace(
+                backend="catia",
+                backend_executable=None,
+                backend_cmd=None,
+            )
+
+            backend = convert_catpart.resolve_backend(args)
+        finally:
+            if original is None:
+                os.environ.pop("CATPART_CATIA_CATSTART_BIN", None)
+            else:
+                os.environ["CATPART_CATIA_CATSTART_BIN"] = original
+
+        self.assertEqual(backend.name, "catia_v5")
+        self.assertEqual(backend.executable, "/bin/echo")
+        self.assertIn("CNEXT -batch -macro", backend.template)
+
+    def test_render_catia_batch_macro_exports_and_reads_native_properties(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            macro = convert_catpart.render_catia_batch_macro(
+                input_path=temp_path / "model.CATPart",
+                output_path=temp_path / "model.step",
+                native_report_path=temp_path / "model.catia-native.txt",
+                export_format="stp",
+            )
+
+        self.assertIn("CATIA.Documents.Open", macro)
+        self.assertIn("doc.ExportData exportBasePath, exportFormat", macro)
+        self.assertIn("product.Analyze", macro)
+        self.assertIn("analyze.Volume", macro)
+        self.assertIn("analyze.GetGravityCenter", macro)
+        self.assertIn("analyze.GetInertia", macro)
+
+    def test_parse_catia_native_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "native.txt"
+            report_path.write_text(
+                "\n".join(
+                    [
+                        "status=converted",
+                        "mass=1,25",
+                        "volume=0.0005",
+                        "wet_area=42",
+                        "gravity_center=1;2;3",
+                        "inertia_matrix=1;0;0;0;2;0;0;0;3",
+                        "source=CATIA Product.Analyze",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            parsed = convert_catpart.parse_catia_native_report(report_path)
+
+        assert parsed is not None
+        self.assertEqual(parsed["kind"], "catia_native")
+        self.assertEqual(parsed["status"], "converted")
+        self.assertEqual(parsed["mass"], 1.25)
+        self.assertEqual(parsed["volume"], 0.0005)
+        self.assertEqual(parsed["wet_area"], 42.0)
+        self.assertEqual(parsed["gravity_center"], [1.0, 2.0, 3.0])
+        self.assertEqual(parsed["inertia_matrix"], [1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0])
+
+    def test_convert_one_with_catia_dry_run_builds_macro_and_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "model.CATPart"
+            output_path = temp_path / "model.step"
+            input_path.write_text("placeholder", encoding="utf-8")
+            backend = convert_catpart.BackendSpec(
+                name="catia_v5",
+                executable="/bin/echo",
+                template=convert_catpart.CATIA_BATCH_TEMPLATE,
+                detected_via="test",
+            )
+
+            result = convert_catpart.convert_one_with_catia(
+                backend=backend,
+                input_path=input_path,
+                output_path=output_path,
+                output_format="step",
+                overwrite=False,
+                dry_run=True,
+                analyze=False,
+                assume_unit=None,
+            )
+
+        self.assertEqual(result["status"], "dry_run")
+        self.assertEqual(result["backend"], "catia_v5")
+        self.assertIn("-run", result["command"])
+        self.assertTrue(Path(result["catia_macro_path"]).exists())
+
     def test_analyze_obj_file_skips_invalid_faces_instead_of_crashing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             obj_path = Path(temp_dir) / "bad.obj"
