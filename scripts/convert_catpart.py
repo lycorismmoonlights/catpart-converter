@@ -72,11 +72,27 @@ TRANSMAGIC_OUTPUT_FORMATS = {
 CAD_EXCHANGER_EXECUTABLES = [
     "ExchangerConv",
     "ExchangerConv.exe",
+    "exchangerconv",
+    "exchangerconv.exe",
     "cadexchangerbatch",
 ]
 
 CAD_EXCHANGER_PATHS = [
+    "/Applications/CAD Exchanger.app/Contents/MacOS/ExchangerConv",
+    "/Applications/CAD Exchanger.app/Contents/MacOS/exchangerconv",
     "/Applications/CAD Exchanger Lab.app/Contents/MacOS/ExchangerConv",
+    "/Applications/CAD Exchanger Lab.app/Contents/MacOS/exchangerconv",
+    "/Applications/CAD Exchanger*/Contents/MacOS/ExchangerConv",
+    "/Applications/CAD Exchanger*/Contents/MacOS/exchangerconv",
+    str(Path.home() / "Applications/CAD Exchanger.app/Contents/MacOS/ExchangerConv"),
+    str(Path.home() / "cadexchanger/bin/ExchangerConv"),
+    str(Path.home() / "cadexchanger/bin/exchangerconv"),
+    "/opt/cadexchanger/bin/ExchangerConv",
+    "/opt/cadexchanger/bin/exchangerconv",
+    "/usr/local/cadexchanger/bin/ExchangerConv",
+    "/usr/local/cadexchanger/bin/exchangerconv",
+    "C:/Program Files/CAD Exchanger*/bin/ExchangerConv.exe",
+    "C:/Program Files/CAD Exchanger*/bin/exchangerconv.exe",
 ]
 CATIA_CATSTART_EXECUTABLES = [
     "catstart",

@@ -168,6 +168,17 @@ class ConvertCatpartTests(unittest.TestCase):
         self.assertIn("--from", backend.template)
         self.assertIn("--to", backend.template)
 
+    def test_cadexchanger_probe_searches_common_cli_paths(self) -> None:
+        self.assertIn("exchangerconv", convert_catpart.CAD_EXCHANGER_EXECUTABLES)
+        self.assertIn(
+            "/Applications/CAD Exchanger.app/Contents/MacOS/ExchangerConv",
+            convert_catpart.CAD_EXCHANGER_PATHS,
+        )
+        self.assertIn(
+            "C:/Program Files/CAD Exchanger*/bin/ExchangerConv.exe",
+            convert_catpart.CAD_EXCHANGER_PATHS,
+        )
+
     def test_resolve_custom_template_requires_executable_when_placeholder_is_used(self) -> None:
         args = argparse.Namespace(
             backend="custom",

@@ -270,7 +270,7 @@ You can configure the backend with environment variables:
 Example:
 
 ```bash
-export CATPART_CONVERTER_BIN="/Applications/CAD Exchanger Lab.app/Contents/MacOS/ExchangerConv"
+export CATPART_CONVERTER_BIN="/Applications/CAD Exchanger.app/Contents/MacOS/ExchangerConv"
 export CATPART_CONVERTER_TEMPLATE='"{executable}" -i "{input}" -e "{output}"'
 ```
 
