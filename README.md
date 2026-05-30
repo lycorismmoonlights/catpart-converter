@@ -10,6 +10,7 @@ The plugin itself does not reverse-engineer CATPart directly. Instead, it wraps 
 - HOOPS path: if the HOOPS Exchange SDK `ImportExport` sample is built and licensed, `--backend hoops` can use its `ImportExport input output` command shape for CATIA V5 file-to-file conversion
 - 3D-Tool path: on Windows with 3D-Tool NativeCAD Converter installed, `--backend 3dtool` uses the documented `Convert.exe -i ... -o ...` batch interface
 - TransMagic path: on Windows with TransMagic COMMAND installed, `--backend transmagic` uses the documented `TMCmd` flow for CATIA V5 to STEP and can parse generated XML mass/bounding/surface reports
+- CoreTechnologie path: if 3D_Evolution, Enterprise Data Manager, or a 3D_Kernel_IO wrapper is installed, `--backend coretechnologie` can use a configured command template for CATIA/STEP conversion
 - Local `STEP` conversion: existing `.step` / `.stp` files can be converted with `FreeCAD` without a CATPart-specific backend
 - Mesh outputs: `OBJ`, `STL`, `GLTF`, `GLB`
 - Exchange outputs: `IGES`, `BREP` / `BRP`, `PRC`, `SAT`, `X_T`, `X_B`
@@ -139,6 +140,16 @@ python scripts\convert_catpart.py C:\path\part.CATPart --backend transmagic --fo
 
 The built-in TransMagic template uses `-ofstp` for STEP and also requests XML assembly, mass, bounding-box, and surface-area reports. If your installation uses a different command shape, set `CATPART_TRANSMAGIC_TEMPLATE`.
 
+Use CoreTechnologie 3D_Evolution or a 3D_Kernel_IO wrapper when licensed and installed:
+
+```bash
+export CATPART_CORETECHNOLOGIE_BIN="/absolute/path/to/3D_Evolution"
+export CATPART_CORETECHNOLOGIE_TEMPLATE='"{executable}" --input "{input}" --output "{output}"'
+python3 scripts/convert_catpart.py /path/to/part.CATPart --backend coretechnologie --format step
+```
+
+CoreTechnologie public material confirms CATIA and STEP support plus automation/batch/script workflows, but does not publish one stable command syntax in the pages available here, so this plugin requires `CATPART_CORETECHNOLOGIE_TEMPLATE` instead of guessing.
+
 Analyze an existing exported file without re-running conversion:
 
 ```bash
@@ -188,7 +199,10 @@ The script supports these backend modes:
 7. `--backend transmagic`
    Uses TransMagic COMMAND / `TMCmd` on Windows and parses generated XML mass-property reports when present.
 
-8. `--backend custom`
+8. `--backend coretechnologie`
+   Uses CoreTechnologie 3D_Evolution, Enterprise Data Manager, or a 3D_Kernel_IO wrapper with a configured command template.
+
+9. `--backend custom`
    Uses your exact command template.
 
 You can configure the backend with environment variables:
@@ -235,6 +249,12 @@ You can configure the backend with environment variables:
 - `CATPART_TRANSMAGIC_TEMPLATE`
   Optional command template for TransMagic. Defaults to `"{executable}" -od"{output_dir}" -otd "{input}" -of{transmagic_format} -xmlasm -xmlbbox -xmlmass -xmlsurf`.
 
+- `CATPART_CORETECHNOLOGIE_BIN`
+  Optional absolute path to CoreTechnologie 3D_Evolution, Enterprise Data Manager, or a 3D_Kernel_IO wrapper.
+
+- `CATPART_CORETECHNOLOGIE_TEMPLATE`
+  Required command template for `--backend coretechnologie`, because public CoreTechnologie pages confirm automation capability but do not expose stable syntax.
+
 - `CATPART_FREECAD_TIMEOUT_SECONDS`
   Optional timeout for `FreeCAD` exact geometry analysis. Defaults to `45` seconds.
 
@@ -266,7 +286,7 @@ python3 scripts/convert_catpart.py /path/to/part.CATPart
 - If no backend is installed, the script exits with a clear setup message instead of failing silently.
 - Missing CATPart backends are reported with structured diagnostics, including current FreeCAD capabilities, supported local exchange formats, example external backends, and `CATPART_CONVERTER_BIN` / `CATPART_CONVERTER_TEMPLATE` setup hints.
 - `--backend catia` uses CATIA V5 batch automation through `catstart -run "CNEXT -batch -macro ..."`. It is the preferred path for native CATPart mass/volume when CATIA and the needed licenses are installed locally.
-- `--backend datakit`, `--backend hoops`, `--backend 3dtool`, and `--backend transmagic` cover additional real-world CATPart converters discovered from vendor documentation. `--probe` reports their environment variables and whether they are detected.
+- `--backend datakit`, `--backend hoops`, `--backend 3dtool`, `--backend transmagic`, and `--backend coretechnologie` cover additional real-world CATPart converters discovered from vendor documentation. `--probe` reports their environment variables and whether they are detected.
 - `--backend transmagic` can add `native_transmagic_analysis` from generated XML mass, bounding-box, and surface-area reports when TransMagic COMMAND creates them.
 - `--probe` also separates manual GUI routes such as Autodesk Fusion from automatic backends, so Fusion can be tracked without being misreported as a headless converter.
 - `--probe` now reports both conversion backend availability and local analysis capabilities.

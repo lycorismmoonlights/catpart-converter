@@ -206,6 +206,7 @@ class ConvertCatpartTests(unittest.TestCase):
         self.assertIn("hoops_exchange_importexport", candidates)
         self.assertIn("three_d_tool", candidates)
         self.assertIn("transmagic_command", candidates)
+        self.assertIn("coretechnologie_3d_evolution", candidates)
         self.assertIn("cad_exchanger_batch", candidates)
 
     def test_datakit_probe_searches_cli_app_paths(self) -> None:
@@ -518,6 +519,57 @@ class ConvertCatpartTests(unittest.TestCase):
         self.assertEqual(parsed["mass_properties"]["center_of_mass"], [1.0, 2.0, 3.0])
         self.assertEqual(parsed["surface"]["area"], 42.25)
         self.assertTrue(parsed["bounding_box"]["values"])
+
+    def test_resolve_coretechnologie_backend_from_env_template(self) -> None:
+        original_bin = os.environ.get("CATPART_CORETECHNOLOGIE_BIN")
+        original_template = os.environ.get("CATPART_CORETECHNOLOGIE_TEMPLATE")
+        os.environ["CATPART_CORETECHNOLOGIE_BIN"] = "/bin/echo"
+        os.environ["CATPART_CORETECHNOLOGIE_TEMPLATE"] = (
+            '"{executable}" --input "{input}" --output "{output}"'
+        )
+        try:
+            args = argparse.Namespace(
+                backend="coretechnologie",
+                backend_executable=None,
+                backend_cmd=None,
+            )
+
+            backend = convert_catpart.resolve_backend(args)
+        finally:
+            if original_bin is None:
+                os.environ.pop("CATPART_CORETECHNOLOGIE_BIN", None)
+            else:
+                os.environ["CATPART_CORETECHNOLOGIE_BIN"] = original_bin
+            if original_template is None:
+                os.environ.pop("CATPART_CORETECHNOLOGIE_TEMPLATE", None)
+            else:
+                os.environ["CATPART_CORETECHNOLOGIE_TEMPLATE"] = original_template
+
+        self.assertEqual(backend.name, "coretechnologie_3d_evolution")
+        self.assertEqual(backend.executable, "/bin/echo")
+        self.assertIn("--input", backend.template)
+
+    def test_resolve_coretechnologie_backend_requires_template(self) -> None:
+        original_bin = os.environ.get("CATPART_CORETECHNOLOGIE_BIN")
+        original_template = os.environ.get("CATPART_CORETECHNOLOGIE_TEMPLATE")
+        os.environ["CATPART_CORETECHNOLOGIE_BIN"] = "/bin/echo"
+        os.environ.pop("CATPART_CORETECHNOLOGIE_TEMPLATE", None)
+        try:
+            args = argparse.Namespace(
+                backend="coretechnologie",
+                backend_executable=None,
+                backend_cmd=None,
+            )
+
+            with self.assertRaises(convert_catpart.BackendNotFoundError):
+                convert_catpart.resolve_backend(args)
+        finally:
+            if original_bin is None:
+                os.environ.pop("CATPART_CORETECHNOLOGIE_BIN", None)
+            else:
+                os.environ["CATPART_CORETECHNOLOGIE_BIN"] = original_bin
+            if original_template is not None:
+                os.environ["CATPART_CORETECHNOLOGIE_TEMPLATE"] = original_template
 
     def test_render_catia_batch_macro_exports_and_reads_native_properties(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

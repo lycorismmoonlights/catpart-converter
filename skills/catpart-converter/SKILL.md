@@ -70,11 +70,19 @@ python scripts\convert_catpart.py "<input.CATPart>" --backend transmagic --forma
 
 This backend uses the documented `TMCmd` command-line flow and requests XML mass, bounding-box, and surface-area reports when available.
 
-9. If the conversion succeeds, read the terminal summary or JSON report first.
-10. For `STEP`, prefer the generated engineering summary first. It combines textual metadata, broad value-type scanning, and exact `FreeCAD` geometry measurements when `freecadcmd` is available.
-11. For existing `BREP` or `IGES` files, use `--analysis-only` to get exact topology, area, volume, center of gravity, and bounding box measurements.
-12. If the backend is missing for `.CATPart`, explain that the plugin is installed but still needs an external CATIA-capable converter backend.
-13. When a report contains `diagnostics`, use it to distinguish missing native CATPart conversion from available local FreeCAD analysis/conversion of existing exchange files.
+9. If CoreTechnologie 3D_Evolution, Enterprise Data Manager, or a 3D_Kernel_IO wrapper is installed, use `--backend coretechnologie` with `CATPART_CORETECHNOLOGIE_BIN` and a command template from the installed product:
+
+```bash
+CATPART_CORETECHNOLOGIE_BIN="/path/to/3D_Evolution" \
+CATPART_CORETECHNOLOGIE_TEMPLATE='"{executable}" --input "{input}" --output "{output}"' \
+python3 plugins/catpart-converter/scripts/convert_catpart.py "<input.CATPart>" --backend coretechnologie --format step
+```
+
+10. If the conversion succeeds, read the terminal summary or JSON report first.
+11. For `STEP`, prefer the generated engineering summary first. It combines textual metadata, broad value-type scanning, and exact `FreeCAD` geometry measurements when `freecadcmd` is available.
+12. For existing `BREP` or `IGES` files, use `--analysis-only` to get exact topology, area, volume, center of gravity, and bounding box measurements.
+13. If the backend is missing for `.CATPart`, explain that the plugin is installed but still needs an external CATIA-capable converter backend.
+14. When a report contains `diagnostics`, use it to distinguish missing native CATPart conversion from available local FreeCAD analysis/conversion of existing exchange files.
 
 ## Backend setup
 
@@ -87,7 +95,8 @@ The script will auto-detect a backend in this order:
 5. `CATPART_HOOPS_IMPORTEXPORT_BIN` / common HOOPS Exchange `ImportExport` sample paths
 6. `CATPART_THREEDTOOL_BIN` / common 3D-Tool `Convert.exe` paths
 7. `CATPART_TRANSMAGIC_BIN` / common TransMagic COMMAND `TMCmd` paths
-8. common `CAD Exchanger` executable names and paths
+8. `CATPART_CORETECHNOLOGIE_BIN` plus `CATPART_CORETECHNOLOGIE_TEMPLATE` / common CoreTechnologie paths
+9. common `CAD Exchanger` executable names and paths
 
 For exact `STEP`, `BREP`, and `IGES` geometry analysis it will also auto-detect `freecadcmd` from:
 
@@ -114,9 +123,9 @@ If no CATPart-capable backend is found, `--probe` returns structured diagnostics
 - Exact `FreeCAD` summaries can include per-solid details, shell details, static moments, inertia matrices, and principal inertia properties when available.
 - `STEP` text summaries include numeric ranges and value-type counts for integers, reals, scientific notation, logicals, enumerations, references, strings, omitted values, and derived values.
 - Local FreeCAD conversion can convert existing `STEP/STP/BREP/IGES/IGS` inputs to `STEP/STP/BREP/IGES/IGS/STL/OBJ` when `--backend auto` is used.
-- `--probe` reports candidate native CATPart backends for CATIA V5 batch, Datakit CrossManager CLI, HOOPS Exchange ImportExport, 3D-Tool NativeCAD Converter, TransMagic COMMAND, and CAD Exchanger Batch.
+- `--probe` reports candidate native CATPart backends for CATIA V5 batch, Datakit CrossManager CLI, HOOPS Exchange ImportExport, 3D-Tool NativeCAD Converter, TransMagic COMMAND, CoreTechnologie 3D_Evolution, and CAD Exchanger Batch.
 - `--probe` reports manual CATPart routes such as Autodesk Fusion separately from automatic backends; do not treat a manual route as plugin-level conversion availability.
-- Datakit, HOOPS, and 3D-Tool are conversion backends only in this plugin. Exact native mass/volume still requires CATIA `Product.Analyze`, TransMagic XML mass reports, or a successful STEP/BREP/IGES export followed by FreeCAD analysis.
+- Datakit, HOOPS, 3D-Tool, and CoreTechnologie are conversion backends only in this plugin unless their configured reports expose mass properties. Exact native mass/volume still requires CATIA `Product.Analyze`, TransMagic XML mass reports, vendor-specific reports, or a successful STEP/BREP/IGES export followed by FreeCAD analysis.
 - Use `--analysis-only` when the user already has a converted `STEP`, `OBJ`, `STL`, `BREP`, or `IGES`.
 - Use `--assume-unit mm` or `--assume-unit m` for mesh files when unit labeling matters.
 - Use `--assume-unit mm` or `--assume-unit m` for `BREP` and `IGES` when the geometry units are known operationally but not labeled clearly in the surrounding workflow.

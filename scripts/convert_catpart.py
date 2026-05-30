@@ -135,6 +135,23 @@ TRANSMAGIC_PATHS = [
     "C:/Program Files/TransMagic Inc/TransMagic*/System/code/bin/TMCmd.exe",
     "C:/Program Files (x86)/TransMagic Inc/TransMagic R*/System/code/bin/TMCmd.exe",
 ]
+CORETECHNOLOGIE_EXECUTABLES = [
+    "3D_Evolution",
+    "3D_Evolution.exe",
+    "3DEvolution",
+    "3DEvolution.exe",
+    "EnterpriseDataManager",
+    "EnterpriseDataManager.exe",
+]
+CORETECHNOLOGIE_PATHS = [
+    "/Applications/3D_Evolution.app/Contents/MacOS/3D_Evolution",
+    "/Applications/CoreTechnologie*/3D_Evolution",
+    "/Applications/CoreTechnologie*/3D_Evolution.app/Contents/MacOS/3D_Evolution",
+    "/opt/CoreTechnologie/*/3D_Evolution",
+    "/opt/coretechnologie/*/3D_Evolution",
+    "C:/Program Files/CoreTechnologie*/3D_Evolution*/3D_Evolution.exe",
+    "C:/Program Files/CoreTechnologie*/3D_Evolution*/EnterpriseDataManager.exe",
+]
 FREECAD_EXECUTABLES = [
     "FreeCADCmd",
     "freecadcmd",
@@ -310,6 +327,7 @@ def parse_args() -> argparse.Namespace:
             "hoops",
             "3dtool",
             "transmagic",
+            "coretechnologie",
             "custom",
         ),
         default="auto",
@@ -1948,6 +1966,43 @@ def discover_transmagic_backend() -> dict[str, Any]:
     }
 
 
+def discover_coretechnologie_backend() -> dict[str, Any]:
+    env_executable = os.environ.get("CATPART_CORETECHNOLOGIE_BIN")
+    env_template = os.environ.get("CATPART_CORETECHNOLOGIE_TEMPLATE")
+    discovered: tuple[str, str] | None = None
+    if env_executable:
+        discovered = (normalize_path(env_executable), "ENV:CATPART_CORETECHNOLOGIE_BIN")
+    else:
+        discovered = discover_executable(CORETECHNOLOGIE_EXECUTABLES, CORETECHNOLOGIE_PATHS)
+
+    return {
+        "available": discovered is not None and bool(env_template),
+        "detected_executable": discovered is not None,
+        "name": "coretechnologie_3d_evolution",
+        "executable": discovered[0] if discovered else None,
+        "detected_via": discovered[1] if discovered else None,
+        "template": env_template,
+        "template_required": True,
+        "supported_output_formats": sorted(FORMAT_EXTENSIONS),
+        "native_properties": [
+            "B-Rep geometry",
+            "assembly structure",
+            "attributes and metadata when exposed by configured reports",
+            "PMI and feature/history data through 3D_Kernel_IO SDK integrations",
+        ],
+        "requires": [
+            "Installed CoreTechnologie 3D_Evolution or 3D_Kernel_IO sample/application",
+            "License with CATIA input support",
+            "License with requested output format support",
+            "CATPART_CORETECHNOLOGIE_TEMPLATE because public pages do not expose a stable CLI syntax",
+        ],
+        "environment": {
+            "CATPART_CORETECHNOLOGIE_BIN": env_executable,
+            "CATPART_CORETECHNOLOGIE_TEMPLATE": env_template,
+        },
+    }
+
+
 def discover_fusion_manual_route() -> dict[str, Any]:
     discovered: tuple[str, str] | None = None
     for candidate in FUSION_APP_PATHS:
@@ -1984,6 +2039,7 @@ def discover_native_backend_candidates() -> dict[str, Any]:
         "hoops_exchange_importexport": discover_hoops_importexport_backend(),
         "three_d_tool": discover_3dtool_backend(),
         "transmagic_command": discover_transmagic_backend(),
+        "coretechnologie_3d_evolution": discover_coretechnologie_backend(),
         "cad_exchanger_batch": {
             "available": discover_executable(CAD_EXCHANGER_EXECUTABLES, CAD_EXCHANGER_PATHS)
             is not None,
@@ -2050,6 +2106,7 @@ def catpart_backend_diagnostics(
             "HOOPS Exchange ImportExport sample",
             "3D-Tool NativeCAD Converter",
             "TransMagic COMMAND / TMCmd",
+            "CoreTechnologie 3D_Evolution / 3D_Kernel_IO",
             "Any local converter callable with {input} and {output}",
         ],
         "catia_batch_backend": catia_batch_backend,
@@ -2070,6 +2127,8 @@ def catpart_backend_diagnostics(
             "CATPART_THREEDTOOL_BIN": "Absolute path to 3D-Tool Convert.exe for --backend 3dtool.",
             "CATPART_TRANSMAGIC_BIN": "Absolute path to TransMagic COMMAND TMCmd executable.",
             "CATPART_TRANSMAGIC_TEMPLATE": "Optional TransMagic command template using {executable}, {input}, {output}, {output_dir}, and {transmagic_format}.",
+            "CATPART_CORETECHNOLOGIE_BIN": "Absolute path to CoreTechnologie 3D_Evolution, Enterprise Data Manager, or a 3D_Kernel_IO sample wrapper.",
+            "CATPART_CORETECHNOLOGIE_TEMPLATE": "CoreTechnologie command template using {executable}, {input}, {output}, and {format}.",
         },
         "example_commands": [
             'export CATPART_CONVERTER_BIN="/absolute/path/to/ExchangerConv"',
@@ -2083,6 +2142,8 @@ def catpart_backend_diagnostics(
             'export CATPART_THREEDTOOL_BIN="C:/Program Files/3D-Tool V17/Convert.exe"',
             'export CATPART_TRANSMAGIC_BIN="C:/Program Files/TransMagic Inc/TransMagic RXX/System/code/bin/TMCmd.exe"',
             'python3 scripts/convert_catpart.py part.CATPart --backend transmagic --format step',
+            'export CATPART_CORETECHNOLOGIE_BIN="/path/to/3D_Evolution"',
+            'export CATPART_CORETECHNOLOGIE_TEMPLATE=\'"{executable}" --input "{input}" --output "{output}"\'',
         ],
         "current_limitation": (
             "Without a CATPart-capable backend, this plugin can analyze existing STEP, "
@@ -2195,6 +2256,14 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
         args.backend_cmd
         or os.environ.get("CATPART_TRANSMAGIC_TEMPLATE")
         or TRANSMAGIC_TEMPLATE
+    )
+    coretechnologie_executable = (
+        args.backend_executable or os.environ.get("CATPART_CORETECHNOLOGIE_BIN")
+    )
+    coretechnologie_template = (
+        args.backend_cmd
+        or os.environ.get("CATPART_CORETECHNOLOGIE_TEMPLATE")
+        or env_template
     )
 
     if args.backend == "custom":
@@ -2385,6 +2454,43 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
             detected_via=transmagic_detected_via,
         )
 
+    if args.backend in {"auto", "coretechnologie"} and not executable_override and not template_override:
+        coretechnologie_backend = discover_coretechnologie_backend()
+        if coretechnologie_backend["available"]:
+            return BackendSpec(
+                name="coretechnologie_3d_evolution",
+                executable=str(coretechnologie_backend["executable"]),
+                template=str(coretechnologie_backend["template"]),
+                detected_via=str(coretechnologie_backend["detected_via"]),
+            )
+
+    if args.backend == "coretechnologie":
+        coretechnologie_detected_via = "CLI_OR_ENV_CORETECHNOLOGIE"
+        if not coretechnologie_executable:
+            coretechnologie_discovered = discover_executable(
+                CORETECHNOLOGIE_EXECUTABLES,
+                CORETECHNOLOGIE_PATHS,
+            )
+            if coretechnologie_discovered:
+                coretechnologie_executable = coretechnologie_discovered[0]
+                coretechnologie_detected_via = coretechnologie_discovered[1]
+        if not coretechnologie_executable:
+            raise BackendNotFoundError(
+                "CoreTechnologie backend requested but 3D_Evolution/EDM executable was not found. "
+                "Set --backend-executable or CATPART_CORETECHNOLOGIE_BIN."
+            )
+        if not coretechnologie_template:
+            raise BackendNotFoundError(
+                "CoreTechnologie backend requested but no command template was provided. "
+                "Set --backend-cmd or CATPART_CORETECHNOLOGIE_TEMPLATE."
+            )
+        return BackendSpec(
+            name="coretechnologie_3d_evolution",
+            executable=normalize_path(coretechnologie_executable),
+            template=coretechnologie_template,
+            detected_via=coretechnologie_detected_via,
+        )
+
     if args.backend in {"auto", "cadexchanger"}:
         if executable_override:
             executable = normalize_path(executable_override)
@@ -2412,10 +2518,11 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
         "Recommended setup:\n"
         "1. Install a converter backend such as CAD Exchanger Batch, Datakit CrossManager CLI, "
         "HOOPS Exchange ImportExport, 3D-Tool NativeCAD Converter, TransMagic COMMAND, "
-        "or use CATIA V5 batch mode.\n"
+        "CoreTechnologie 3D_Evolution, or use CATIA V5 batch mode.\n"
         "2. Set CATPART_CONVERTER_BIN to a converter executable, CATPART_CATIA_CATSTART_BIN "
         "to CATIA catstart, CATPART_DATKIT_BIN plus CATPART_DATKIT_TEMPLATE, or "
-        "CATPART_HOOPS_IMPORTEXPORT_BIN, CATPART_THREEDTOOL_BIN, or CATPART_TRANSMAGIC_BIN.\n"
+        "CATPART_HOOPS_IMPORTEXPORT_BIN, CATPART_THREEDTOOL_BIN, CATPART_TRANSMAGIC_BIN, "
+        "or CATPART_CORETECHNOLOGIE_BIN plus CATPART_CORETECHNOLOGIE_TEMPLATE.\n"
         "3. Optionally set CATPART_CONVERTER_TEMPLATE if your converter uses different flags.\n\n"
         "Example:\n"
         '  export CATPART_CONVERTER_BIN="/absolute/path/to/ExchangerConv"\n'
@@ -2424,7 +2531,8 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
         '  export CATPART_DATKIT_BIN="/absolute/path/to/CrossManagerCLI"\n'
         '  export CATPART_HOOPS_IMPORTEXPORT_BIN="/path/to/ImportExport"\n'
         '  export CATPART_THREEDTOOL_BIN="C:/Program Files/3D-Tool V17/Convert.exe"\n'
-        '  export CATPART_TRANSMAGIC_BIN="C:/Program Files/TransMagic Inc/TransMagic RXX/System/code/bin/TMCmd.exe"'
+        '  export CATPART_TRANSMAGIC_BIN="C:/Program Files/TransMagic Inc/TransMagic RXX/System/code/bin/TMCmd.exe"\n'
+        '  export CATPART_CORETECHNOLOGIE_BIN="/path/to/3D_Evolution"'
     )
 
 

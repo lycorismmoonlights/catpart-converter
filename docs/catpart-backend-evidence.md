@@ -23,6 +23,7 @@ Missing:
 - HOOPS Exchange `ImportExport`
 - 3D-Tool `Convert.exe`
 - TransMagic COMMAND / `TMCmd`
+- CoreTechnologie 3D_Evolution / 3D_Kernel_IO wrapper
 - Autodesk Fusion app
 - CADfix / SpinFire Convert executables
 
@@ -36,6 +37,7 @@ Missing:
 | HOOPS Exchange ImportExport | Yes, if SDK sample is built and licensed | SDK can expose B-Rep/metadata; exact mass extraction would need a dedicated SDK wrapper | Commercial SDK; macOS sample path documented | Implemented as `--backend hoops` |
 | 3D-Tool NativeCAD Converter | Yes, through `Convert.exe -i ... -o ...` | No native mass path exposed here; analyze exported STEP/BREP/IGES | Windows-only commercial tool | Implemented as `--backend 3dtool` |
 | TransMagic COMMAND | Yes, through `TMCmd` and output flags such as `-ofstp` | Yes, through generated XML mass reports when `-xmlasm -xmlmass -xmlbbox -xmlsurf` are available | Commercial Windows executable command interface | Implemented as `--backend transmagic` |
+| CoreTechnologie 3D_Evolution / 3D_Kernel_IO | Yes, if licensed and command template or wrapper is supplied | No stable public mass-report CLI exposed here; analyze exported STEP/BREP/IGES or parse configured vendor reports | Commercial; 3D_Evolution supports automation/batch/script workflows; 3D_Kernel_IO API is documented as available on Windows, Linux, and Mac | Implemented as `--backend coretechnologie` with required template |
 
 ## Additional Candidates Checked
 
@@ -46,6 +48,7 @@ Missing:
 | FreeCAD / OCCT | Local FreeCAD is installed and exact analysis works for STEP/BREP/IGES. OCCT/CAD Assistant docs cover open/neutral formats, not CATPart. | Not a CATPart importer. Keep as post-conversion exact geometry backend. |
 | SimLab CADVRter | Vendor page says Windows/macOS, 100% local, CLI, CATIA V5 import. Export list is VR/mesh-oriented: PDF, 3DS, 3MF, DAE, CTM, DWG/DXF, FBX, glTF/GLB, OSG, SKP, STL, USDZ, U3D, OBJ. | Useful for local visualization/mesh outputs, but not a direct STEP or exact mass/volume path. Not adopted for this plugin's STEP target. |
 | CADfix | CAD Interop page lists CATIA V5 import and STEP export; matrix notes Windows-only for CADfix 13 SP2 DX/CAE. | Viable commercial Windows backend, not currently useful on this Mac. |
+| Spatial 3D InterOp SDK | Official Spatial material says it reads/writes CATPart/CATProduct and STEP, imports exact B-Rep geometry and metadata, and provides C++/C# samples plus 3DScript for prototyping. | Strong SDK route, but no installed SDK or stable local CLI was found here. Not implemented until an SDK wrapper or callable script is available. |
 | NVIDIA Omniverse CAD Converter | Docs list CATIA V5 files and local/batch CAD converter service, but target is USD. | Useful for USD ingestion, not direct STEP or exact mass/volume. Not adopted for this plugin's STEP target. |
 | ODA MCAD SDK | Official ODA page advertises native MCAD access, exact B-Rep, Common API to STEP, and macOS support. However, the same page states the free trial currently supports SolidWorks and Inventor only; CATIA `.CATPart` geometry is scheduled for beta in July 2026 and full release later. | Promising future SDK route, but not a usable CATPart backend on this machine as of 2026-05-30. Not adopted yet. |
 | SpinFire Convert / Theorem | Vendor pages describe CATIA V5 independent and batch translation solutions. | Viable commercial backend class, but no installed executable or public command template found locally. Can be configured via `--backend custom`. |
@@ -75,6 +78,10 @@ python3 scripts/convert_catpart.py --probe
 - Autodesk Fusion `ImportManager` API: https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/ImportManager.htm
 - Datakit CrossManager CLI: https://www.datakit.com/en/news/product-focus-crossmanager-cli-241.html
 - Datakit CrossManager formats/licensing: https://www.datakit.com.cn/crossmanager.html
+- CoreTechnologie 3D_Evolution: https://coretechnologie.com/products/3d-evolution/
+- CoreTechnologie Enterprise Data Manager: https://coretechnologie.com/products/3d-evolution/enterprise-data-manager/
+- CoreTechnologie 3D_Kernel_IO: https://www.coretechnologie.com/fileadmin/user_upload/3D_Kernel_IO_Brochure__EN.pdf
+- Spatial 3D InterOp: https://www.spatial.com/products/BIM-Interop
 - SimLab CADVRter: https://www.cadinterop.com/en/our-products/simlab/simlab-cadvrter.html
 - TransMagic converter: https://transmagic.com/cad-file-converter/
 - TransMagic COMMAND: https://support.transmagic.com/hc/en-us/articles/201894039-What-is-TM-Command
