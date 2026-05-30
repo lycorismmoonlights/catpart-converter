@@ -205,6 +205,7 @@ class ConvertCatpartTests(unittest.TestCase):
         self.assertIn("datakit_crossmanager_cli", candidates)
         self.assertIn("hoops_exchange_importexport", candidates)
         self.assertIn("three_d_tool", candidates)
+        self.assertIn("transmagic_command", candidates)
         self.assertIn("cad_exchanger_batch", candidates)
 
     def test_datakit_probe_searches_cli_app_paths(self) -> None:
@@ -435,6 +436,88 @@ class ConvertCatpartTests(unittest.TestCase):
         self.assertEqual(backend.name, "3d_tool")
         self.assertEqual(backend.executable, str(executable.resolve()))
         self.assertEqual(backend.template, convert_catpart.THREED_TOOL_TEMPLATE)
+
+    def test_resolve_transmagic_backend_from_env(self) -> None:
+        original = os.environ.get("CATPART_TRANSMAGIC_BIN")
+        os.environ["CATPART_TRANSMAGIC_BIN"] = "/bin/echo"
+        try:
+            args = argparse.Namespace(
+                backend="transmagic",
+                backend_executable=None,
+                backend_cmd=None,
+            )
+
+            backend = convert_catpart.resolve_backend(args)
+        finally:
+            if original is None:
+                os.environ.pop("CATPART_TRANSMAGIC_BIN", None)
+            else:
+                os.environ["CATPART_TRANSMAGIC_BIN"] = original
+
+        self.assertEqual(backend.name, "transmagic_command")
+        self.assertEqual(backend.executable, "/bin/echo")
+        self.assertIn("-of{transmagic_format}", backend.template)
+        self.assertIn("-xmlmass", backend.template)
+
+    def test_transmagic_dry_run_builds_command_and_expected_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "model.CATPart"
+            output_path = temp_path / "model.step"
+            input_path.write_text("placeholder", encoding="utf-8")
+            backend = convert_catpart.BackendSpec(
+                name="transmagic_command",
+                executable="/bin/echo",
+                template=convert_catpart.TRANSMAGIC_TEMPLATE,
+                detected_via="test",
+            )
+
+            result = convert_catpart.convert_one_with_transmagic(
+                backend=backend,
+                input_path=input_path,
+                output_path=output_path,
+                output_format="step",
+                overwrite=False,
+                dry_run=True,
+                analyze=False,
+                assume_unit=None,
+            )
+
+        self.assertEqual(result["status"], "dry_run")
+        self.assertEqual(result["backend"], "transmagic_command")
+        self.assertEqual(result["transmagic_output_format"], "stp")
+        self.assertTrue(result["transmagic_expected_output"].endswith("model.stp"))
+        self.assertIn("-ofstp", result["command"])
+        self.assertIn("-xmlmass", result["command"])
+
+    def test_parse_transmagic_xml_report_extracts_mass_properties(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "model.xml"
+            xml_path.write_text(
+                """<?xml version="1.0"?>
+<Assembly>
+  <Part>
+    <Mass>
+      <Volume>12.5</Volume>
+      <Center_Of_Mass>1 2 3</Center_Of_Mass>
+      <Inertia_Tensor>1 0 0 0 2 0 0 0 3</Inertia_Tensor>
+    </Mass>
+    <Surface_Area>42.25</Surface_Area>
+    <Bounding_Box size="10 20 30" />
+  </Part>
+</Assembly>
+""",
+                encoding="utf-8",
+            )
+
+            parsed = convert_catpart.parse_transmagic_xml_report(xml_path)
+
+        assert parsed is not None
+        self.assertEqual(parsed["kind"], "transmagic_xml")
+        self.assertEqual(parsed["mass_properties"]["volume"], 12.5)
+        self.assertEqual(parsed["mass_properties"]["center_of_mass"], [1.0, 2.0, 3.0])
+        self.assertEqual(parsed["surface"]["area"], 42.25)
+        self.assertTrue(parsed["bounding_box"]["values"])
 
     def test_render_catia_batch_macro_exports_and_reads_native_properties(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

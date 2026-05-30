@@ -22,8 +22,9 @@ Missing:
 - Datakit CrossManager CLI
 - HOOPS Exchange `ImportExport`
 - 3D-Tool `Convert.exe`
+- TransMagic COMMAND / `TMCmd`
 - Autodesk Fusion app
-- TransMagic / CADfix / SpinFire Convert executables
+- CADfix / SpinFire Convert executables
 
 ## Adopted Backend Profiles
 
@@ -34,6 +35,7 @@ Missing:
 | Datakit CrossManager CLI | Yes, if licensed and command template is supplied | No native mass path exposed here; analyze exported STEP/BREP/IGES | Commercial; 2026 product note says no-GUI CLI runs on Windows, Linux, and macOS; public pages do not expose stable CLI syntax | Implemented as `--backend datakit` |
 | HOOPS Exchange ImportExport | Yes, if SDK sample is built and licensed | SDK can expose B-Rep/metadata; exact mass extraction would need a dedicated SDK wrapper | Commercial SDK; macOS sample path documented | Implemented as `--backend hoops` |
 | 3D-Tool NativeCAD Converter | Yes, through `Convert.exe -i ... -o ...` | No native mass path exposed here; analyze exported STEP/BREP/IGES | Windows-only commercial tool | Implemented as `--backend 3dtool` |
+| TransMagic COMMAND | Yes, through `TMCmd` and output flags such as `-ofstp` | Yes, through generated XML mass reports when `-xmlasm -xmlmass -xmlbbox -xmlsurf` are available | Commercial Windows executable command interface | Implemented as `--backend transmagic` |
 
 ## Additional Candidates Checked
 
@@ -43,7 +45,6 @@ Missing:
 | Open Cascade CAD Assistant | Official page lists STEP, IFC, IGES, BREP, glTF, JT, PLY, STL, OBJ, 3DM, DXF, SAT, XT, etc. CATPart is not listed. | Not suitable for native CATPart import. Useful only after conversion to open exchange formats. |
 | FreeCAD / OCCT | Local FreeCAD is installed and exact analysis works for STEP/BREP/IGES. OCCT/CAD Assistant docs cover open/neutral formats, not CATPart. | Not a CATPart importer. Keep as post-conversion exact geometry backend. |
 | SimLab CADVRter | Vendor page says Windows/macOS, 100% local, CLI, CATIA V5 import. Export list is VR/mesh-oriented: PDF, 3DS, 3MF, DAE, CTM, DWG/DXF, FBX, glTF/GLB, OSG, SKP, STL, USDZ, U3D, OBJ. | Useful for local visualization/mesh outputs, but not a direct STEP or exact mass/volume path. Not adopted for this plugin's STEP target. |
-| TransMagic COMMAND | Vendor pages list CATIA V5 read and STEP write; COMMAND is a Windows executable command interface. | Viable commercial Windows backend, but no macOS executable found here. Can be used through `--backend custom` if installed elsewhere. |
 | CADfix | CAD Interop page lists CATIA V5 import and STEP export; matrix notes Windows-only for CADfix 13 SP2 DX/CAE. | Viable commercial Windows backend, not currently useful on this Mac. |
 | NVIDIA Omniverse CAD Converter | Docs list CATIA V5 files and local/batch CAD converter service, but target is USD. | Useful for USD ingestion, not direct STEP or exact mass/volume. Not adopted for this plugin's STEP target. |
 | ODA MCAD SDK | Official ODA page advertises native MCAD access, exact B-Rep, Common API to STEP, and macOS support. However, the same page states the free trial currently supports SolidWorks and Inventor only; CATIA `.CATPart` geometry is scheduled for beta in July 2026 and full release later. | Promising future SDK route, but not a usable CATPart backend on this machine as of 2026-05-30. Not adopted yet. |
@@ -77,6 +78,7 @@ python3 scripts/convert_catpart.py --probe
 - SimLab CADVRter: https://www.cadinterop.com/en/our-products/simlab/simlab-cadvrter.html
 - TransMagic converter: https://transmagic.com/cad-file-converter/
 - TransMagic COMMAND: https://support.transmagic.com/hc/en-us/articles/201894039-What-is-TM-Command
+- TransMagic COMMAND user guide PDF: https://www.transmagic.com/downloads/transmagic-command.pdf
 - HOOPS Exchange ImportExport setup: https://docs.techsoft3d.com/exchange/2024.8.0/tutorials/environment-setup.html
 - NVIDIA Omniverse CAD Converter service: https://docs.omniverse.nvidia.com/kit/docs/omni.services.convert.cad/503.2.5/Overview.html
 - ODA MCAD SDK: https://www.opendesign.com/products/mcad-sdk

@@ -9,6 +9,7 @@ The plugin itself does not reverse-engineer CATPart directly. Instead, it wraps 
 - Datakit path: if Datakit CrossManager CLI is installed and its command template is provided, `--backend datakit` can be used for CATIA V5 to STEP conversion
 - HOOPS path: if the HOOPS Exchange SDK `ImportExport` sample is built and licensed, `--backend hoops` can use its `ImportExport input output` command shape for CATIA V5 file-to-file conversion
 - 3D-Tool path: on Windows with 3D-Tool NativeCAD Converter installed, `--backend 3dtool` uses the documented `Convert.exe -i ... -o ...` batch interface
+- TransMagic path: on Windows with TransMagic COMMAND installed, `--backend transmagic` uses the documented `TMCmd` flow for CATIA V5 to STEP and can parse generated XML mass/bounding/surface reports
 - Local `STEP` conversion: existing `.step` / `.stp` files can be converted with `FreeCAD` without a CATPart-specific backend
 - Mesh outputs: `OBJ`, `STL`, `GLTF`, `GLB`
 - Exchange outputs: `IGES`, `BREP` / `BRP`, `PRC`, `SAT`, `X_T`, `X_B`
@@ -24,6 +25,8 @@ After conversion, the script now inspects supported outputs automatically:
 Exact `FreeCAD` reports also include per-solid details, shell counts, static moments, inertia matrices, and principal inertia properties when the imported shape exposes them.
 
 When the CATIA V5 batch backend is available, conversion reports can also include `native_catia_analysis` from CATIA's own `Product.Analyze` object: mass, volume, wet area, gravity center, and inertia matrix. This requires CATIA to open the source file in design mode and have the relevant export/analysis licenses.
+
+When the TransMagic COMMAND backend is available, conversion reports can include `native_transmagic_analysis` parsed from TransMagic XML output options such as mass properties, bounding box, and surface area.
 
 `STEP` text analysis also scans parameter values broadly. It reports counts and ranges for integers, real numbers, scientific notation, signed values, logical values (`.T.`, `.F.`, `.U.`), enumerations, entity references, strings, omitted values (`$`), and derived values (`*`).
 
@@ -127,6 +130,15 @@ set CATPART_THREEDTOOL_BIN=C:\Program Files\3D-Tool V17\Convert.exe
 python scripts\convert_catpart.py C:\path\part.CATPart --backend 3dtool --format step
 ```
 
+Use TransMagic COMMAND on Windows:
+
+```bash
+set CATPART_TRANSMAGIC_BIN=C:\Program Files\TransMagic Inc\TransMagic RXX\System\code\bin\TMCmd.exe
+python scripts\convert_catpart.py C:\path\part.CATPart --backend transmagic --format step
+```
+
+The built-in TransMagic template uses `-ofstp` for STEP and also requests XML assembly, mass, bounding-box, and surface-area reports. If your installation uses a different command shape, set `CATPART_TRANSMAGIC_TEMPLATE`.
+
 Analyze an existing exported file without re-running conversion:
 
 ```bash
@@ -173,7 +185,10 @@ The script supports these backend modes:
 6. `--backend 3dtool`
    Uses 3D-Tool NativeCAD Converter on Windows.
 
-7. `--backend custom`
+7. `--backend transmagic`
+   Uses TransMagic COMMAND / `TMCmd` on Windows and parses generated XML mass-property reports when present.
+
+8. `--backend custom`
    Uses your exact command template.
 
 You can configure the backend with environment variables:
@@ -214,6 +229,12 @@ You can configure the backend with environment variables:
 - `CATPART_THREEDTOOL_BIN`
   Optional absolute path to 3D-Tool `Convert.exe`. Enables `--backend 3dtool` with the documented `"{executable}" -i "{input}" -o "{output}"` command shape.
 
+- `CATPART_TRANSMAGIC_BIN`
+  Optional absolute path to TransMagic COMMAND `TMCmd.exe`. Enables `--backend transmagic`.
+
+- `CATPART_TRANSMAGIC_TEMPLATE`
+  Optional command template for TransMagic. Defaults to `"{executable}" -od"{output_dir}" -otd "{input}" -of{transmagic_format} -xmlasm -xmlbbox -xmlmass -xmlsurf`.
+
 - `CATPART_FREECAD_TIMEOUT_SECONDS`
   Optional timeout for `FreeCAD` exact geometry analysis. Defaults to `45` seconds.
 
@@ -245,7 +266,8 @@ python3 scripts/convert_catpart.py /path/to/part.CATPart
 - If no backend is installed, the script exits with a clear setup message instead of failing silently.
 - Missing CATPart backends are reported with structured diagnostics, including current FreeCAD capabilities, supported local exchange formats, example external backends, and `CATPART_CONVERTER_BIN` / `CATPART_CONVERTER_TEMPLATE` setup hints.
 - `--backend catia` uses CATIA V5 batch automation through `catstart -run "CNEXT -batch -macro ..."`. It is the preferred path for native CATPart mass/volume when CATIA and the needed licenses are installed locally.
-- `--backend datakit`, `--backend hoops`, and `--backend 3dtool` cover additional real-world CATPart converters discovered from vendor documentation. `--probe` reports their environment variables and whether they are detected.
+- `--backend datakit`, `--backend hoops`, `--backend 3dtool`, and `--backend transmagic` cover additional real-world CATPart converters discovered from vendor documentation. `--probe` reports their environment variables and whether they are detected.
+- `--backend transmagic` can add `native_transmagic_analysis` from generated XML mass, bounding-box, and surface-area reports when TransMagic COMMAND creates them.
 - `--probe` also separates manual GUI routes such as Autodesk Fusion from automatic backends, so Fusion can be tracked without being misreported as a headless converter.
 - `--probe` now reports both conversion backend availability and local analysis capabilities.
 - `freecadcmd` is auto-detected from `PATH`, common app paths, and common conda environment locations such as `/opt/anaconda3/envs/*/bin/freecadcmd`.

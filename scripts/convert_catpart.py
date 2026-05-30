@@ -16,6 +16,7 @@ import struct
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,6 +58,15 @@ CATIA_EXPORT_FORMATS = {
     "iges": "igs",
     "igs": "igs",
     "stl": "stl",
+}
+TRANSMAGIC_OUTPUT_FORMATS = {
+    "step": "stp",
+    "stp": "stp",
+    "iges": "igs",
+    "igs": "igs",
+    "stl": "stl",
+    "x_t": "x_t",
+    "sat": "sat",
 }
 
 CAD_EXCHANGER_EXECUTABLES = [
@@ -112,6 +122,18 @@ THREED_TOOL_EXECUTABLES = [
 THREED_TOOL_PATHS = [
     "C:/Program Files/3D-Tool V*/Convert.exe",
     "C:/Program Files (x86)/3D-Tool V*/Convert.exe",
+]
+TRANSMAGIC_EXECUTABLES = [
+    "TMCmd",
+    "tmcmd",
+    "TMCmd.exe",
+    "tmcmd.exe",
+]
+TRANSMAGIC_PATHS = [
+    "C:/Program Files/TransMagic Inc/TransMagic R*/System/code/bin/TMCmd.exe",
+    "C:/Program Files/TransMagic Inc/TransMagic R*/System/code/bin/tmcmd.exe",
+    "C:/Program Files/TransMagic Inc/TransMagic*/System/code/bin/TMCmd.exe",
+    "C:/Program Files (x86)/TransMagic Inc/TransMagic R*/System/code/bin/TMCmd.exe",
 ]
 FREECAD_EXECUTABLES = [
     "FreeCADCmd",
@@ -194,6 +216,10 @@ CAD_EXCHANGER_TEMPLATE = '"{executable}" -i "{input}" -e "{output}"'
 CATIA_BATCH_TEMPLATE = '"{executable}" -run "CNEXT -batch -macro {macro}"'
 HOOPS_IMPORTEXPORT_TEMPLATE = '"{executable}" "{input}" "{output}"'
 THREED_TOOL_TEMPLATE = '"{executable}" -i "{input}" -o "{output}"'
+TRANSMAGIC_TEMPLATE = (
+    '"{executable}" -od"{output_dir}" -otd "{input}" -of{transmagic_format} '
+    "-xmlasm -xmlbbox -xmlmass -xmlsurf"
+)
 FLOAT_RE = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[Ee][-+]?\d+)?")
 STEP_NUMBER_START_RE = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?")
 STEP_ENTITY_RE = re.compile(r"#\d+\s*=\s*([A-Z0-9_]+)\s*\(")
@@ -276,7 +302,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--backend",
-        choices=("auto", "cadexchanger", "catia", "datakit", "hoops", "3dtool", "custom"),
+        choices=(
+            "auto",
+            "cadexchanger",
+            "catia",
+            "datakit",
+            "hoops",
+            "3dtool",
+            "transmagic",
+            "custom",
+        ),
         default="auto",
         help="Backend selection strategy (default: auto)",
     )
@@ -1875,6 +1910,44 @@ def discover_3dtool_backend() -> dict[str, Any]:
     }
 
 
+def discover_transmagic_backend() -> dict[str, Any]:
+    env_executable = os.environ.get("CATPART_TRANSMAGIC_BIN")
+    env_template = os.environ.get("CATPART_TRANSMAGIC_TEMPLATE")
+    discovered: tuple[str, str] | None = None
+    if env_executable:
+        discovered = (normalize_path(env_executable), "ENV:CATPART_TRANSMAGIC_BIN")
+    else:
+        discovered = discover_executable(TRANSMAGIC_EXECUTABLES, TRANSMAGIC_PATHS)
+
+    return {
+        "available": discovered is not None,
+        "name": "transmagic_command",
+        "executable": discovered[0] if discovered else None,
+        "detected_via": discovered[1] if discovered else None,
+        "template": env_template or (TRANSMAGIC_TEMPLATE if discovered else None),
+        "supported_output_formats": sorted(TRANSMAGIC_OUTPUT_FORMATS),
+        "native_properties": [
+            "volume",
+            "center_of_mass",
+            "principal_axes",
+            "inertia_tensor",
+            "principal_moments",
+            "surface_area",
+            "bounding_box",
+        ],
+        "requires": [
+            "Installed TransMagic COMMAND / TMCmd",
+            "Windows executable environment",
+            "License with CATIA V5 read support",
+            "License with requested output format support",
+        ],
+        "environment": {
+            "CATPART_TRANSMAGIC_BIN": env_executable,
+            "CATPART_TRANSMAGIC_TEMPLATE": env_template,
+        },
+    }
+
+
 def discover_fusion_manual_route() -> dict[str, Any]:
     discovered: tuple[str, str] | None = None
     for candidate in FUSION_APP_PATHS:
@@ -1910,6 +1983,7 @@ def discover_native_backend_candidates() -> dict[str, Any]:
         "datakit_crossmanager_cli": discover_datakit_crossmanager_backend(),
         "hoops_exchange_importexport": discover_hoops_importexport_backend(),
         "three_d_tool": discover_3dtool_backend(),
+        "transmagic_command": discover_transmagic_backend(),
         "cad_exchanger_batch": {
             "available": discover_executable(CAD_EXCHANGER_EXECUTABLES, CAD_EXCHANGER_PATHS)
             is not None,
@@ -1975,6 +2049,7 @@ def catpart_backend_diagnostics(
             "Datakit CrossManager CLI",
             "HOOPS Exchange ImportExport sample",
             "3D-Tool NativeCAD Converter",
+            "TransMagic COMMAND / TMCmd",
             "Any local converter callable with {input} and {output}",
         ],
         "catia_batch_backend": catia_batch_backend,
@@ -1993,6 +2068,8 @@ def catpart_backend_diagnostics(
             "CATPART_HOOPS_IMPORTEXPORT_BIN": "Absolute path to the built HOOPS Exchange ImportExport sample.",
             "CATPART_HOOPS_TEMPLATE": "Optional HOOPS ImportExport command template using {executable}, {input}, {output}, and {format}.",
             "CATPART_THREEDTOOL_BIN": "Absolute path to 3D-Tool Convert.exe for --backend 3dtool.",
+            "CATPART_TRANSMAGIC_BIN": "Absolute path to TransMagic COMMAND TMCmd executable.",
+            "CATPART_TRANSMAGIC_TEMPLATE": "Optional TransMagic command template using {executable}, {input}, {output}, {output_dir}, and {transmagic_format}.",
         },
         "example_commands": [
             'export CATPART_CONVERTER_BIN="/absolute/path/to/ExchangerConv"',
@@ -2004,6 +2081,8 @@ def catpart_backend_diagnostics(
             'export CATPART_HOOPS_IMPORTEXPORT_BIN="/path/to/HOOPS_Exchange/samples/exchange/exchangesource/ImportExport/ImportExport"',
             'python3 scripts/convert_catpart.py part.CATPart --backend hoops --format step',
             'export CATPART_THREEDTOOL_BIN="C:/Program Files/3D-Tool V17/Convert.exe"',
+            'export CATPART_TRANSMAGIC_BIN="C:/Program Files/TransMagic Inc/TransMagic RXX/System/code/bin/TMCmd.exe"',
+            'python3 scripts/convert_catpart.py part.CATPart --backend transmagic --format step',
         ],
         "current_limitation": (
             "Without a CATPart-capable backend, this plugin can analyze existing STEP, "
@@ -2111,6 +2190,12 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
         or HOOPS_IMPORTEXPORT_TEMPLATE
     )
     threedtool_executable = args.backend_executable or os.environ.get("CATPART_THREEDTOOL_BIN")
+    transmagic_executable = args.backend_executable or os.environ.get("CATPART_TRANSMAGIC_BIN")
+    transmagic_template = (
+        args.backend_cmd
+        or os.environ.get("CATPART_TRANSMAGIC_TEMPLATE")
+        or TRANSMAGIC_TEMPLATE
+    )
 
     if args.backend == "custom":
         if not template_override:
@@ -2268,6 +2353,38 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
             detected_via=threedtool_detected_via,
         )
 
+    if args.backend in {"auto", "transmagic"} and not executable_override and not template_override:
+        transmagic_backend = discover_transmagic_backend()
+        if transmagic_backend["available"]:
+            return BackendSpec(
+                name="transmagic_command",
+                executable=str(transmagic_backend["executable"]),
+                template=str(transmagic_backend["template"]),
+                detected_via=str(transmagic_backend["detected_via"]),
+            )
+
+    if args.backend == "transmagic":
+        transmagic_detected_via = "CLI_OR_ENV_TRANSMAGIC"
+        if not transmagic_executable:
+            transmagic_discovered = discover_executable(
+                TRANSMAGIC_EXECUTABLES,
+                TRANSMAGIC_PATHS,
+            )
+            if transmagic_discovered:
+                transmagic_executable = transmagic_discovered[0]
+                transmagic_detected_via = transmagic_discovered[1]
+        if not transmagic_executable:
+            raise BackendNotFoundError(
+                "TransMagic backend requested but TMCmd was not found. "
+                "Set --backend-executable or CATPART_TRANSMAGIC_BIN."
+            )
+        return BackendSpec(
+            name="transmagic_command",
+            executable=normalize_path(transmagic_executable),
+            template=transmagic_template,
+            detected_via=transmagic_detected_via,
+        )
+
     if args.backend in {"auto", "cadexchanger"}:
         if executable_override:
             executable = normalize_path(executable_override)
@@ -2294,10 +2411,11 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
         "proprietary format.\n\n"
         "Recommended setup:\n"
         "1. Install a converter backend such as CAD Exchanger Batch, Datakit CrossManager CLI, "
-        "HOOPS Exchange ImportExport, 3D-Tool NativeCAD Converter, or use CATIA V5 batch mode.\n"
+        "HOOPS Exchange ImportExport, 3D-Tool NativeCAD Converter, TransMagic COMMAND, "
+        "or use CATIA V5 batch mode.\n"
         "2. Set CATPART_CONVERTER_BIN to a converter executable, CATPART_CATIA_CATSTART_BIN "
         "to CATIA catstart, CATPART_DATKIT_BIN plus CATPART_DATKIT_TEMPLATE, or "
-        "CATPART_HOOPS_IMPORTEXPORT_BIN, or CATPART_THREEDTOOL_BIN.\n"
+        "CATPART_HOOPS_IMPORTEXPORT_BIN, CATPART_THREEDTOOL_BIN, or CATPART_TRANSMAGIC_BIN.\n"
         "3. Optionally set CATPART_CONVERTER_TEMPLATE if your converter uses different flags.\n\n"
         "Example:\n"
         '  export CATPART_CONVERTER_BIN="/absolute/path/to/ExchangerConv"\n'
@@ -2305,7 +2423,8 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
         '  export CATPART_CATIA_CATSTART_BIN="/path/to/DassaultSystemes/Bxx/code/command/catstart"\n'
         '  export CATPART_DATKIT_BIN="/absolute/path/to/CrossManagerCLI"\n'
         '  export CATPART_HOOPS_IMPORTEXPORT_BIN="/path/to/ImportExport"\n'
-        '  export CATPART_THREEDTOOL_BIN="C:/Program Files/3D-Tool V17/Convert.exe"'
+        '  export CATPART_THREEDTOOL_BIN="C:/Program Files/3D-Tool V17/Convert.exe"\n'
+        '  export CATPART_TRANSMAGIC_BIN="C:/Program Files/TransMagic Inc/TransMagic RXX/System/code/bin/TMCmd.exe"'
     )
 
 
@@ -2318,7 +2437,11 @@ def render_command(backend: BackendSpec, input_path: Path, output_path: Path, ou
         "executable": backend.executable,
         "input": str(input_path),
         "output": str(output_path),
+        "output_dir": str(output_path.parent),
+        "output_stem": output_path.stem,
+        "output_suffix": output_path.suffix.lstrip("."),
         "format": output_format,
+        "transmagic_format": TRANSMAGIC_OUTPUT_FORMATS.get(output_format, output_format),
     }
     return [segment.format(**values) for segment in shlex.split(backend.template)]
 
@@ -2597,6 +2720,140 @@ def parse_catia_native_report(path: Path) -> dict[str, Any] | None:
     return native
 
 
+def transmagic_created_output_path(input_path: Path, output_path: Path, output_format: str) -> Path:
+    transmagic_format = TRANSMAGIC_OUTPUT_FORMATS.get(output_format)
+    if transmagic_format is None:
+        raise ValueError(
+            f"TransMagic backend does not support target format '{output_format}'. "
+            f"Supported targets: {', '.join(sorted(TRANSMAGIC_OUTPUT_FORMATS))}."
+        )
+    return output_path.parent / f"{input_path.stem}.{transmagic_format}"
+
+
+def transmagic_xml_report_candidates(input_path: Path, output_path: Path) -> list[Path]:
+    candidates = [
+        output_path.with_suffix(".xml"),
+        output_path.parent / f"{input_path.stem}.xml",
+        output_path.parent / f"{input_path.stem}_asm.xml",
+        output_path.parent / f"{input_path.stem}_assembly.xml",
+        output_path.parent / f"{input_path.stem}.XML",
+    ]
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate not in seen:
+            seen.add(candidate)
+            unique.append(candidate)
+    return unique
+
+
+def xml_local_name(tag: str) -> str:
+    if "}" in tag:
+        tag = tag.rsplit("}", 1)[1]
+    return re.sub(r"[^a-z0-9]+", "_", tag.strip().lower()).strip("_")
+
+
+def parse_xml_numeric_payload(text: str | None) -> float | list[float] | None:
+    if not text:
+        return None
+    matches = [float(match) for match in FLOAT_RE.findall(text)]
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return round_number(matches[0])
+    return [round_number(value) for value in matches]
+
+
+def collect_transmagic_xml_value(
+    bucket: dict[str, Any],
+    *,
+    key: str,
+    value: float | list[float] | None,
+    path: str,
+) -> None:
+    if value is None:
+        return
+    normalized_key = key.lower()
+    entry = {"path": path, "value": value}
+
+    if "volume" in normalized_key:
+        bucket.setdefault("mass_properties", {})["volume"] = value
+    elif "center" in normalized_key and "mass" in normalized_key:
+        bucket.setdefault("mass_properties", {})["center_of_mass"] = value
+    elif "inertia" in normalized_key:
+        bucket.setdefault("mass_properties", {}).setdefault("inertia", []).append(entry)
+    elif "principal" in normalized_key and ("moment" in normalized_key or "axis" in normalized_key):
+        bucket.setdefault("mass_properties", {}).setdefault("principal", []).append(entry)
+    elif "surface" in normalized_key and "area" in normalized_key:
+        bucket.setdefault("surface", {})["area"] = value
+    elif "bounding" in normalized_key or "bbox" in normalized_key:
+        bucket.setdefault("bounding_box", {}).setdefault("values", []).append(entry)
+
+    bucket.setdefault("numeric_values", []).append(entry)
+
+
+def parse_transmagic_xml_report(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError as exc:
+        return {
+            "kind": "transmagic_xml",
+            "status": "failed",
+            "source": "TransMagic COMMAND XML",
+            "path": str(path),
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+        }
+
+    parsed: dict[str, Any] = {
+        "kind": "transmagic_xml",
+        "status": "parsed",
+        "source": "TransMagic COMMAND XML",
+        "path": str(path),
+    }
+
+    def walk(element: ET.Element, parents: list[str]) -> None:
+        tag_name = xml_local_name(element.tag)
+        path_parts = [*parents, tag_name] if tag_name else parents
+        path_key = "_".join(part for part in path_parts[-4:] if part)
+        text_value = parse_xml_numeric_payload(element.text)
+        collect_transmagic_xml_value(
+            parsed,
+            key=path_key,
+            value=text_value,
+            path="/".join(path_parts),
+        )
+        for attribute_name, attribute_value in element.attrib.items():
+            key = f"{path_key}_{xml_local_name(attribute_name)}"
+            collect_transmagic_xml_value(
+                parsed,
+                key=key,
+                value=parse_xml_numeric_payload(attribute_value),
+                path="/".join([*path_parts, f"@{attribute_name}"]),
+            )
+        for child in element:
+            walk(child, path_parts)
+
+    walk(root, [])
+
+    if "numeric_values" in parsed:
+        parsed["numeric_value_count"] = len(parsed["numeric_values"])
+        parsed["numeric_values"] = parsed["numeric_values"][:detail_limit()]
+    return parsed
+
+
+def parse_transmagic_xml_reports(input_path: Path, output_path: Path) -> list[dict[str, Any]]:
+    reports: list[dict[str, Any]] = []
+    for candidate in transmagic_xml_report_candidates(input_path, output_path):
+        parsed = parse_transmagic_xml_report(candidate)
+        if parsed is not None:
+            reports.append(parsed)
+    return reports
+
+
 def convert_one_with_catia(
     backend: BackendSpec,
     input_path: Path,
@@ -2716,6 +2973,113 @@ def convert_one_with_catia(
         result["stderr"] = (
             (completed.stderr or "")
             + "\nCATIA batch returned success but no output file was created."
+        ).strip()
+        return result
+
+    result["status"] = "converted"
+    result["output_sha256"] = sha256_of(output_path)
+    result["output_size_bytes"] = output_path.stat().st_size
+    if analyze:
+        try:
+            analysis = analyze_output_file(output_path, output_format, assume_unit=assume_unit)
+        except Exception as exc:  # pragma: no cover - defensive reporting
+            result["analysis_error"] = str(exc)
+        else:
+            if analysis is not None:
+                result["analysis"] = analysis
+    return result
+
+
+def convert_one_with_transmagic(
+    backend: BackendSpec,
+    input_path: Path,
+    output_path: Path,
+    output_format: str,
+    overwrite: bool,
+    dry_run: bool,
+    analyze: bool,
+    assume_unit: str | None,
+) -> dict[str, Any]:
+    started_at = time.time()
+    source_sha256 = sha256_of(input_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if input_path == output_path:
+        raise FileExistsError(
+            f"Output path resolves to the source file: {output_path}. Choose a different output path."
+        )
+
+    transmagic_format = TRANSMAGIC_OUTPUT_FORMATS.get(output_format)
+    if transmagic_format is None:
+        raise ValueError(
+            f"TransMagic backend does not support target format '{output_format}'. "
+            f"Supported targets: {', '.join(sorted(TRANSMAGIC_OUTPUT_FORMATS))}."
+        )
+
+    expected_transmagic_output_path = transmagic_created_output_path(
+        input_path,
+        output_path,
+        output_format,
+    )
+    output_candidates = {output_path, expected_transmagic_output_path}
+    existing_outputs = [path for path in output_candidates if path.exists()]
+    if existing_outputs and not overwrite:
+        raise FileExistsError(
+            "Output already exists: "
+            + ", ".join(str(path) for path in existing_outputs)
+            + ". Re-run with --overwrite to replace it."
+        )
+
+    command = render_command(backend, input_path, output_path, output_format)
+    result: dict[str, Any] = {
+        "source": str(input_path),
+        "source_format": "catpart",
+        "output": str(output_path),
+        "format": output_format,
+        "backend": backend.name,
+        "backend_detected_via": backend.detected_via,
+        "command": command,
+        "status": "dry_run" if dry_run else "pending",
+        "started_at_epoch": started_at,
+        "source_sha256": source_sha256,
+        "transmagic_output_format": transmagic_format,
+        "transmagic_expected_output": str(expected_transmagic_output_path),
+        "transmagic_xml_candidates": [
+            str(candidate) for candidate in transmagic_xml_report_candidates(input_path, output_path)
+        ],
+    }
+
+    if dry_run:
+        result["duration_seconds"] = 0.0
+        return result
+
+    for candidate in existing_outputs:
+        candidate.unlink()
+
+    completed = subprocess.run(command, capture_output=True, text=True)
+    finished_at = time.time()
+
+    result["returncode"] = completed.returncode
+    result["stdout"] = completed.stdout
+    result["stderr"] = completed.stderr
+    result["duration_seconds"] = round(finished_at - started_at, 3)
+
+    transmagic_reports = parse_transmagic_xml_reports(input_path, output_path)
+    if transmagic_reports:
+        result["native_transmagic_analysis"] = transmagic_reports
+
+    if expected_transmagic_output_path.exists() and expected_transmagic_output_path != output_path:
+        expected_transmagic_output_path.replace(output_path)
+
+    if completed.returncode != 0:
+        result["status"] = "failed"
+        return result
+
+    if not output_path.exists():
+        result["status"] = "failed"
+        result["stderr"] = (
+            (completed.stderr or "")
+            + "\nTransMagic COMMAND returned success but no output file was created."
         ).strip()
         return result
 
@@ -3012,6 +3376,17 @@ def main() -> int:
                     backend = resolve_backend(args)
                 if backend.name == "catia_v5":
                     result = convert_one_with_catia(
+                        backend=backend,
+                        input_path=input_path,
+                        output_path=output_path,
+                        output_format=args.format,
+                        overwrite=args.overwrite,
+                        dry_run=args.dry_run,
+                        analyze=not args.skip_analysis,
+                        assume_unit=args.assume_unit,
+                    )
+                elif backend.name == "transmagic_command":
+                    result = convert_one_with_transmagic(
                         backend=backend,
                         input_path=input_path,
                         output_path=output_path,
