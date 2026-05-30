@@ -39,7 +39,7 @@ Missing:
 
 | Candidate | Evidence | Verdict |
 | --- | --- | --- |
-| Autodesk Fusion | Official Autodesk docs list CATIA V5 `.CATPart/.CATProduct` import and STEP export. Homebrew has `autodesk-fusion` cask. | Plausible GUI/API route, but not a quiet local CLI backend. Requires app install, Autodesk login/licensing, and likely Fusion API scripting. Not auto-installed. |
+| Autodesk Fusion | Official Autodesk docs list CATIA V5 `.CATPart/.CATProduct` import and STEP export. Homebrew has `autodesk-fusion` cask. The public `ImportManager` API lists STEP, IGES, SAT, SMT, Fusion archive, SVG, and DXF import option constructors, but not a CATIA/CATPart import option. | Plausible manual GUI route, but not a quiet local CLI/API backend for CATPart based on public API docs. Requires app install, Autodesk login/licensing, and likely manual upload/open/export flow. Not auto-installed. |
 | Open Cascade CAD Assistant | Official page lists STEP, IFC, IGES, BREP, glTF, JT, PLY, STL, OBJ, 3DM, DXF, SAT, XT, etc. CATPart is not listed. | Not suitable for native CATPart import. Useful only after conversion to open exchange formats. |
 | FreeCAD / OCCT | Local FreeCAD is installed and exact analysis works for STEP/BREP/IGES. OCCT/CAD Assistant docs cover open/neutral formats, not CATPart. | Not a CATPart importer. Keep as post-conversion exact geometry backend. |
 | SimLab CADVRter | Vendor page says Windows/macOS, 100% local, CLI, CATIA V5 import. Export list is VR/mesh-oriented: PDF, 3DS, 3MF, DAE, CTM, DWG/DXF, FBX, glTF/GLB, OSG, SKP, STL, USDZ, U3D, OBJ. | Useful for local visualization/mesh outputs, but not a direct STEP or exact mass/volume path. Not adopted for this plugin's STEP target. |
@@ -68,6 +68,7 @@ python3 scripts/convert_catpart.py --probe
 - CADfix: https://www.cadinterop.com/en/our-products/cadfix.html
 - Autodesk Fusion file formats: https://www.autodesk.com/support/technical/article/caas/sfdcarticles/sfdcarticles/File-formats-supported-by-Fusion-360.html
 - Autodesk Fusion export formats: https://www.autodesk.com/support/technical/article/caas/sfdcarticles/sfdcarticles/Export-format-options-for-Fusion-360.html
+- Autodesk Fusion `ImportManager` API: https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/ImportManager.htm
 - SimLab CADVRter: https://www.cadinterop.com/en/our-products/simlab/simlab-cadvrter.html
 - TransMagic converter: https://transmagic.com/cad-file-converter/
 - TransMagic COMMAND: https://support.transmagic.com/hc/en-us/articles/201894039-What-is-TM-Command
