@@ -35,6 +35,7 @@ When the CATIA V5 batch backend is available, conversion reports can also includ
 
 - `scripts/convert_catpart.py`: conversion entry point
 - `skills/catpart-converter/SKILL.md`: Codex usage instructions
+- `docs/catpart-backend-evidence.md`: checked backend evidence, platform notes, and why some near-miss tools are not enough for native CATPart
 - `.codex-plugin/plugin.json`: plugin manifest
 
 ## Quick Start
