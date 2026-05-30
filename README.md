@@ -6,6 +6,7 @@ The plugin itself does not reverse-engineer CATPart directly. Instead, it wraps 
 
 - Recommended readable output: `STEP` (`.step` / `.stp`)
 - Native CATIA path: if CATIA V5 `catstart` is installed, `--backend catia` can run a generated CATScript to export `.CATPart` and collect native `Product.Analyze` mass properties
+- pycatia path: on Windows CATIA workstations with `pycatia` installed, `--backend pycatia` can automate CATIA V5 through COM, export STEP/IGES/STL, and collect native `Product.Analyze` mass properties
 - CAD Exchanger SDK path: if the CAD Exchanger Python SDK package and license are configured, `--backend cadexsdk` can run the SDK `ModelReader -> ModelWriter` flow for CATIA V5 to STEP and other exchange outputs
 - Datakit path: if Datakit CrossManager CLI is installed and its command template is provided, `--backend datakit` can be used for CATIA V5 to STEP conversion
 - HOOPS path: if the HOOPS Exchange SDK `ImportExport` sample is built and licensed, `--backend hoops` can use its `ImportExport input output` command shape for CATIA V5 file-to-file conversion
@@ -27,6 +28,8 @@ After conversion, the script now inspects supported outputs automatically:
 Exact `FreeCAD` reports also include per-solid details, shell counts, static moments, inertia matrices, and principal inertia properties when the imported shape exposes them.
 
 When the CATIA V5 batch backend is available, conversion reports can also include `native_catia_analysis` from CATIA's own `Product.Analyze` object: mass, volume, wet area, gravity center, and inertia matrix. This requires CATIA to open the source file in design mode and have the relevant export/analysis licenses.
+
+When the pycatia backend is available, conversion reports can include `native_pycatia_analysis` from the same CATIA `Product.Analyze` object, but accessed through Python COM automation instead of a generated CATScript.
 
 When the TransMagic COMMAND backend is available, conversion reports can include `native_transmagic_analysis` parsed from TransMagic XML output options such as mass properties, bounding box, and surface area.
 
@@ -105,6 +108,15 @@ Optional CATIA environment settings:
 export CATPART_CATIA_ENV="CATIA.V5Rxx"
 export CATPART_CATIA_DIRENV="/path/to/CATEnv"
 ```
+
+Use pycatia on a Windows CATIA V5 workstation:
+
+```bash
+set CATPART_PYCATIA_PYTHON=C:\Python311\python.exe
+python scripts\convert_catpart.py C:\path\part.CATPart --backend pycatia --format step
+```
+
+This path uses CATIA V5's COM automation through pycatia. It still requires CATIA to be installed and licensed locally, but it avoids needing to locate `catstart`.
 
 Use CAD Exchanger Python SDK when licensed and installed:
 
@@ -201,22 +213,25 @@ The script supports these backend modes:
 4. `--backend catia`
    Uses CATIA V5 batch automation through `catstart`.
 
-5. `--backend datakit`
+5. `--backend pycatia`
+   Uses `scripts/pycatia_convert.py` with pycatia and CATIA V5 COM automation.
+
+6. `--backend datakit`
    Uses Datakit CrossManager CLI with a configured command template.
 
-6. `--backend hoops`
+7. `--backend hoops`
    Uses the HOOPS Exchange `ImportExport` sample command shape.
 
-7. `--backend 3dtool`
+8. `--backend 3dtool`
    Uses 3D-Tool NativeCAD Converter on Windows.
 
-8. `--backend transmagic`
+9. `--backend transmagic`
    Uses TransMagic COMMAND / `TMCmd` on Windows and parses generated XML mass-property reports when present.
 
-9. `--backend coretechnologie`
+10. `--backend coretechnologie`
    Uses CoreTechnologie 3D_Evolution, Enterprise Data Manager, or a 3D_Kernel_IO wrapper with a configured command template.
 
-10. `--backend custom`
+11. `--backend custom`
    Uses your exact command template.
 
 You can configure the backend with environment variables:
@@ -241,6 +256,9 @@ You can configure the backend with environment variables:
 
 - `CATPART_CATIA_TIMEOUT_SECONDS`
   Optional timeout for CATIA batch conversion. Defaults to `300` seconds.
+
+- `CATPART_PYCATIA_PYTHON`
+  Optional Python executable where `pycatia` is installed. Enables `--backend pycatia` on Windows CATIA V5 workstations.
 
 - `CATPART_CADEX_SDK_PYTHON`
   Optional Python executable where the CAD Exchanger SDK `cadexchanger` package is installed. Enables `--backend cadexsdk` when a license is also configured.
@@ -309,6 +327,7 @@ python3 scripts/convert_catpart.py /path/to/part.CATPart
 - If no backend is installed, the script exits with a clear setup message instead of failing silently.
 - Missing CATPart backends are reported with structured diagnostics, including current FreeCAD capabilities, supported local exchange formats, example external backends, and `CATPART_CONVERTER_BIN` / `CATPART_CONVERTER_TEMPLATE` setup hints.
 - `--backend catia` uses CATIA V5 batch automation through `catstart -run "CNEXT -batch -macro ..."`. It is the preferred path for native CATPart mass/volume when CATIA and the needed licenses are installed locally.
+- `--backend pycatia` uses CATIA V5 COM automation through Python. It is useful when CATIA is installed on Windows and pycatia is easier to configure than a `catstart` batch environment.
 - `--backend cadexsdk` uses CAD Exchanger's Python SDK conversion API when the private SDK package and license are configured. It is a direct SDK route rather than the `ExchangerConv` batch executable.
 - `--backend datakit`, `--backend hoops`, `--backend 3dtool`, `--backend transmagic`, and `--backend coretechnologie` cover additional real-world CATPart converters discovered from vendor documentation. `--probe` reports their environment variables and whether they are detected.
 - `--backend transmagic` can add `native_transmagic_analysis` from generated XML mass, bounding-box, and surface-area reports when TransMagic COMMAND creates them.

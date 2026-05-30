@@ -154,6 +154,57 @@ class ConvertCatpartTests(unittest.TestCase):
         self.assertEqual(backend.executable, "/bin/echo")
         self.assertIn("CNEXT -batch -macro", backend.template)
 
+    def test_resolve_pycatia_backend_from_env(self) -> None:
+        original = os.environ.get("CATPART_PYCATIA_PYTHON")
+        os.environ["CATPART_PYCATIA_PYTHON"] = "/bin/echo"
+        try:
+            args = argparse.Namespace(
+                backend="pycatia",
+                backend_executable=None,
+                backend_cmd=None,
+            )
+
+            backend = convert_catpart.resolve_backend(args)
+        finally:
+            if original is None:
+                os.environ.pop("CATPART_PYCATIA_PYTHON", None)
+            else:
+                os.environ["CATPART_PYCATIA_PYTHON"] = original
+
+        self.assertEqual(backend.name, "pycatia_catia_v5")
+        self.assertEqual(backend.executable, "/bin/echo")
+        self.assertIn("{pycatia_script}", backend.template)
+
+    def test_pycatia_dry_run_builds_helper_command_and_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "model.CATPart"
+            output_path = temp_path / "model.step"
+            input_path.write_text("placeholder", encoding="utf-8")
+            backend = convert_catpart.BackendSpec(
+                name="pycatia_catia_v5",
+                executable="/bin/echo",
+                template=convert_catpart.PYCATIA_TEMPLATE,
+                detected_via="test",
+            )
+
+            result = convert_catpart.convert_one_with_pycatia(
+                backend=backend,
+                input_path=input_path,
+                output_path=output_path,
+                output_format="step",
+                overwrite=False,
+                dry_run=True,
+                analyze=False,
+                assume_unit=None,
+            )
+
+        self.assertEqual(result["status"], "dry_run")
+        self.assertEqual(result["backend"], "pycatia_catia_v5")
+        self.assertEqual(result["catia_export_format"], "stp")
+        self.assertTrue(result["pycatia_native_report"].endswith(".pycatia-native.json"))
+        self.assertIn(str(convert_catpart.PYCATIA_TRANSFER_SCRIPT), result["command"])
+
     def test_resolve_cadexchanger_honors_template_override(self) -> None:
         args = argparse.Namespace(
             backend="cadexchanger",
@@ -307,6 +358,7 @@ class ConvertCatpartTests(unittest.TestCase):
         candidates = payload["analysis_capabilities"]["native_backend_candidates"]
 
         self.assertIn("catia_v5_batch", candidates)
+        self.assertIn("pycatia_catia_v5", candidates)
         self.assertIn("datakit_crossmanager_cli", candidates)
         self.assertIn("hoops_exchange_importexport", candidates)
         self.assertIn("three_d_tool", candidates)

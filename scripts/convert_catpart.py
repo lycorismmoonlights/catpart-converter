@@ -194,6 +194,7 @@ FREECAD_INPUT_ENV_NAMES = ("CATPART_EXACT_GEOMETRY_INPUT", "CATPART_STEP_INPUT")
 FREECAD_MEASURE_SCRIPT = Path(__file__).with_name("freecad_measure_step.py")
 FREECAD_CONVERT_SCRIPT = Path(__file__).with_name("freecad_convert.py")
 CADEX_SDK_TRANSFER_SCRIPT = Path(__file__).with_name("cadex_sdk_transfer.py")
+PYCATIA_TRANSFER_SCRIPT = Path(__file__).with_name("pycatia_convert.py")
 DEFAULT_FREECAD_TIMEOUT_SECONDS = 45.0
 DEFAULT_DETAIL_LIMIT = 100
 DEFAULT_CATIA_TIMEOUT_SECONDS = 300.0
@@ -248,6 +249,10 @@ LENGTH_UNIT_ALIASES = {
 
 CAD_EXCHANGER_TEMPLATE = '"{executable}" -i "{input}" -e "{output}"'
 CADEX_SDK_TEMPLATE = '"{executable}" "{cadex_sdk_script}" "{input}" "{output}"'
+PYCATIA_TEMPLATE = (
+    '"{executable}" "{pycatia_script}" "{input}" "{output}" '
+    '"{catia_export_format}" "{pycatia_report}"'
+)
 CATIA_BATCH_TEMPLATE = '"{executable}" -run "CNEXT -batch -macro {macro}"'
 HOOPS_IMPORTEXPORT_TEMPLATE = '"{executable}" "{input}" "{output}"'
 THREED_TOOL_TEMPLATE = '"{executable}" -i "{input}" -o "{output}"'
@@ -344,6 +349,7 @@ def parse_args() -> argparse.Namespace:
             "catia",
             "datakit",
             "hoops",
+            "pycatia",
             "3dtool",
             "transmagic",
             "coretechnologie",
@@ -435,6 +441,15 @@ def cadex_sdk_python_executable() -> tuple[str | None, str | None]:
         return normalize_path(env_python), "ENV:CATPART_CADEX_SDK_PYTHON"
     if module_is_available("cadexchanger"):
         return normalize_path(sys.executable), "CURRENT_PYTHON:cadexchanger"
+    return None, None
+
+
+def pycatia_python_executable() -> tuple[str | None, str | None]:
+    env_python = os.environ.get("CATPART_PYCATIA_PYTHON")
+    if env_python:
+        return normalize_path(env_python), "ENV:CATPART_PYCATIA_PYTHON"
+    if module_is_available("pycatia"):
+        return normalize_path(sys.executable), "CURRENT_PYTHON:pycatia"
     return None, None
 
 
@@ -1850,6 +1865,41 @@ def discover_catia_batch_backend() -> dict[str, Any]:
     }
 
 
+def discover_pycatia_backend() -> dict[str, Any]:
+    python_executable, detected_via = pycatia_python_executable()
+    module_available_current_python = module_is_available("pycatia")
+    helper_available = PYCATIA_TRANSFER_SCRIPT.exists()
+
+    return {
+        "available": bool(python_executable and helper_available),
+        "name": "pycatia_catia_v5",
+        "executable": python_executable,
+        "detected_via": detected_via,
+        "template": PYCATIA_TEMPLATE if python_executable else None,
+        "helper_script": str(PYCATIA_TRANSFER_SCRIPT),
+        "helper_script_available": helper_available,
+        "python_module_available_current_interpreter": module_available_current_python,
+        "supported_output_formats": sorted(CATIA_EXPORT_FORMATS),
+        "native_properties": [
+            "mass",
+            "volume",
+            "wet_area",
+            "gravity_center",
+            "inertia_matrix",
+        ],
+        "requires": [
+            "Windows workstation with CATIA V5 installed and COM automation registered",
+            "pycatia Python package installed in CATPART_PYCATIA_PYTHON or current Python",
+            "CATIA license that can open the CATPart release",
+            "STEP/IGES/STL export license for the requested output format",
+            "Space Analysis/Product Analyze access for native mass properties",
+        ],
+        "environment": {
+            "CATPART_PYCATIA_PYTHON": os.environ.get("CATPART_PYCATIA_PYTHON"),
+        },
+    }
+
+
 def discover_datakit_crossmanager_backend() -> dict[str, Any]:
     env_executable = os.environ.get("CATPART_DATKIT_BIN")
     env_template = os.environ.get("CATPART_DATKIT_TEMPLATE")
@@ -2112,6 +2162,7 @@ def discover_fusion_manual_route() -> dict[str, Any]:
 def discover_native_backend_candidates() -> dict[str, Any]:
     return {
         "catia_v5_batch": discover_catia_batch_backend(),
+        "pycatia_catia_v5": discover_pycatia_backend(),
         "datakit_crossmanager_cli": discover_datakit_crossmanager_backend(),
         "hoops_exchange_importexport": discover_hoops_importexport_backend(),
         "three_d_tool": discover_3dtool_backend(),
@@ -2180,6 +2231,7 @@ def catpart_backend_diagnostics(
         "required_external_backend_examples": [
             "CAD Exchanger Batch / ExchangerConv",
             "CATIA V5 batch export through catstart/CNEXT/CATScript",
+            "pycatia COM automation through CATIA V5",
             "Datakit CrossManager CLI",
             "HOOPS Exchange ImportExport sample",
             "3D-Tool NativeCAD Converter",
@@ -2199,6 +2251,7 @@ def catpart_backend_diagnostics(
             "CATPART_CATIA_CATSTART_BIN": "Absolute path to CATIA V5 catstart for the built-in --backend catia path.",
             "CATPART_CATIA_ENV": "Optional CATIA environment name passed to catstart -env.",
             "CATPART_CATIA_DIRENV": "Optional CATIA environment directory passed to catstart -direnv.",
+            "CATPART_PYCATIA_PYTHON": "Optional Python executable with pycatia installed for --backend pycatia.",
             "CATPART_DATKIT_BIN": "Absolute path to Datakit CrossManager CLI executable.",
             "CATPART_DATKIT_TEMPLATE": "Datakit CrossManager CLI command template using {executable}, {input}, {output}, and {format}.",
             "CATPART_HOOPS_IMPORTEXPORT_BIN": "Absolute path to the built HOOPS Exchange ImportExport sample.",
@@ -2217,6 +2270,8 @@ def catpart_backend_diagnostics(
             'export CATPART_CONVERTER_TEMPLATE=\'"{executable}" -i "{input}" -e "{output}"\'',
             'export CATPART_CATIA_CATSTART_BIN="/path/to/DassaultSystemes/Bxx/code/command/catstart"',
             'python3 scripts/convert_catpart.py part.CATPart --backend catia --format step',
+            'export CATPART_PYCATIA_PYTHON="C:/Python311/python.exe"',
+            'python scripts/convert_catpart.py part.CATPart --backend pycatia --format step',
             'export CATPART_DATKIT_BIN="/absolute/path/to/CrossManagerCLI"',
             'export CATPART_DATKIT_TEMPLATE=\'"{executable}" --input "{input}" --output "{output}"\'',
             'export CATPART_HOOPS_IMPORTEXPORT_BIN="/path/to/HOOPS_Exchange/samples/exchange/exchangesource/ImportExport/ImportExport"',
@@ -2352,6 +2407,8 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
     )
     cadexsdk_python = args.backend_executable or os.environ.get("CATPART_CADEX_SDK_PYTHON")
     cadexsdk_detected_via = "CLI_OR_ENV_CADEX_SDK_PYTHON"
+    pycatia_python = args.backend_executable or os.environ.get("CATPART_PYCATIA_PYTHON")
+    pycatia_detected_via = "CLI_OR_ENV_PYCATIA_PYTHON"
 
     if args.backend == "custom":
         if not template_override:
@@ -2406,6 +2463,37 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
             executable=normalize_path(catstart_executable),
             template=CATIA_BATCH_TEMPLATE,
             detected_via="CLI_OR_ENV_CATIA_CATSTART",
+        )
+
+    if args.backend in {"auto", "pycatia"} and not executable_override and not template_override:
+        pycatia_backend = discover_pycatia_backend()
+        if pycatia_backend["available"]:
+            return BackendSpec(
+                name="pycatia_catia_v5",
+                executable=str(pycatia_backend["executable"]),
+                template=PYCATIA_TEMPLATE,
+                detected_via=str(pycatia_backend["detected_via"]),
+            )
+
+    if args.backend == "pycatia":
+        if not pycatia_python:
+            pycatia_python, detected_via = pycatia_python_executable()
+            pycatia_detected_via = detected_via or pycatia_detected_via
+        if not pycatia_python:
+            raise BackendNotFoundError(
+                "pycatia backend requested but pycatia was not found. Set "
+                "--backend-executable or CATPART_PYCATIA_PYTHON to a Python interpreter "
+                "where pycatia is installed and CATIA V5 COM automation is available."
+            )
+        if not PYCATIA_TRANSFER_SCRIPT.exists():
+            raise BackendNotFoundError(
+                f"pycatia helper script is missing: {PYCATIA_TRANSFER_SCRIPT}"
+            )
+        return BackendSpec(
+            name="pycatia_catia_v5",
+            executable=normalize_path(pycatia_python),
+            template=PYCATIA_TEMPLATE,
+            detected_via=pycatia_detected_via,
         )
 
     if args.backend in {"auto", "datakit"} and not executable_override and not template_override:
@@ -2642,17 +2730,19 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
         "Recommended setup:\n"
         "1. Install a converter backend such as CAD Exchanger Batch, Datakit CrossManager CLI, "
         "HOOPS Exchange ImportExport, 3D-Tool NativeCAD Converter, TransMagic COMMAND, "
-        "CoreTechnologie 3D_Evolution, CAD Exchanger Python SDK, or use CATIA V5 batch mode.\n"
+        "CoreTechnologie 3D_Evolution, CAD Exchanger Python SDK, or use CATIA V5 batch/"
+        "pycatia mode.\n"
         "2. Set CATPART_CONVERTER_BIN to a converter executable, CATPART_CATIA_CATSTART_BIN "
         "to CATIA catstart, CATPART_DATKIT_BIN plus CATPART_DATKIT_TEMPLATE, or "
         "CATPART_HOOPS_IMPORTEXPORT_BIN, CATPART_THREEDTOOL_BIN, CATPART_TRANSMAGIC_BIN, "
         "CATPART_CORETECHNOLOGIE_BIN plus CATPART_CORETECHNOLOGIE_TEMPLATE, or "
-        "CATPART_CADEX_SDK_PYTHON plus CATPART_CADEX_LICENSE_FILE.\n"
+        "CATPART_CADEX_SDK_PYTHON plus CATPART_CADEX_LICENSE_FILE, or CATPART_PYCATIA_PYTHON.\n"
         "3. Optionally set CATPART_CONVERTER_TEMPLATE if your converter uses different flags.\n\n"
         "Example:\n"
         '  export CATPART_CONVERTER_BIN="/absolute/path/to/ExchangerConv"\n'
         '  export CATPART_CONVERTER_TEMPLATE=\'"{executable}" -i "{input}" -e "{output}"\'\n'
         '  export CATPART_CATIA_CATSTART_BIN="/path/to/DassaultSystemes/Bxx/code/command/catstart"\n'
+        '  export CATPART_PYCATIA_PYTHON="C:/Python311/python.exe"\n'
         '  export CATPART_DATKIT_BIN="/absolute/path/to/CrossManagerCLI"\n'
         '  export CATPART_HOOPS_IMPORTEXPORT_BIN="/path/to/ImportExport"\n'
         '  export CATPART_THREEDTOOL_BIN="C:/Program Files/3D-Tool V17/Convert.exe"\n'
@@ -2676,8 +2766,11 @@ def render_command(backend: BackendSpec, input_path: Path, output_path: Path, ou
         "output_stem": output_path.stem,
         "output_suffix": output_path.suffix.lstrip("."),
         "format": output_format,
+        "catia_export_format": CATIA_EXPORT_FORMATS.get(output_format, output_format),
         "transmagic_format": TRANSMAGIC_OUTPUT_FORMATS.get(output_format, output_format),
         "cadex_sdk_script": str(CADEX_SDK_TRANSFER_SCRIPT),
+        "pycatia_script": str(PYCATIA_TRANSFER_SCRIPT),
+        "pycatia_report": str(output_path.with_suffix(output_path.suffix + ".pycatia-native.json")),
     }
     return [segment.format(**values) for segment in shlex.split(backend.template)]
 
@@ -2954,6 +3047,31 @@ def parse_catia_native_report(path: Path) -> dict[str, Any] | None:
         native["error_message"] = raw.get("error_message")
 
     return native
+
+
+def parse_json_native_report(path: Path, *, kind: str) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except json.JSONDecodeError as exc:
+        return {
+            "kind": kind,
+            "status": "failed",
+            "source": str(path),
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+        }
+    if isinstance(payload, dict):
+        payload.setdefault("kind", kind)
+        return payload
+    return {
+        "kind": kind,
+        "status": "failed",
+        "source": str(path),
+        "error": "Native report JSON root is not an object.",
+        "error_type": "InvalidReport",
+    }
 
 
 def transmagic_created_output_path(input_path: Path, output_path: Path, output_format: str) -> Path:
@@ -3333,6 +3451,101 @@ def convert_one_with_transmagic(
     return result
 
 
+def convert_one_with_pycatia(
+    backend: BackendSpec,
+    input_path: Path,
+    output_path: Path,
+    output_format: str,
+    overwrite: bool,
+    dry_run: bool,
+    analyze: bool,
+    assume_unit: str | None,
+) -> dict[str, Any]:
+    started_at = time.time()
+    source_sha256 = sha256_of(input_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if input_path == output_path:
+        raise FileExistsError(
+            f"Output path resolves to the source file: {output_path}. Choose a different output path."
+        )
+
+    catia_export_format = CATIA_EXPORT_FORMATS.get(output_format)
+    if catia_export_format is None:
+        raise ValueError(
+            f"pycatia backend does not support target format '{output_format}'. "
+            f"Supported targets: {', '.join(sorted(CATIA_EXPORT_FORMATS))}."
+        )
+
+    native_report_path = output_path.with_suffix(output_path.suffix + ".pycatia-native.json")
+    if output_path.exists() and not overwrite:
+        raise FileExistsError(
+            f"Output already exists: {output_path}. Re-run with --overwrite to replace it."
+        )
+
+    command = render_command(backend, input_path, output_path, output_format)
+    result: dict[str, Any] = {
+        "source": str(input_path),
+        "source_format": "catpart",
+        "output": str(output_path),
+        "format": output_format,
+        "backend": backend.name,
+        "backend_detected_via": backend.detected_via,
+        "command": command,
+        "status": "dry_run" if dry_run else "pending",
+        "started_at_epoch": started_at,
+        "source_sha256": source_sha256,
+        "pycatia_native_report": str(native_report_path),
+        "catia_export_format": catia_export_format,
+    }
+
+    if dry_run:
+        result["duration_seconds"] = 0.0
+        return result
+
+    if output_path.exists() and overwrite:
+        output_path.unlink()
+    if native_report_path.exists() and overwrite:
+        native_report_path.unlink()
+
+    completed = subprocess.run(command, capture_output=True, text=True)
+    finished_at = time.time()
+
+    result["returncode"] = completed.returncode
+    result["stdout"] = completed.stdout
+    result["stderr"] = completed.stderr
+    result["duration_seconds"] = round(finished_at - started_at, 3)
+
+    native_analysis = parse_json_native_report(native_report_path, kind="pycatia_native")
+    if native_analysis is not None:
+        result["native_pycatia_analysis"] = native_analysis
+
+    if completed.returncode != 0:
+        result["status"] = "failed"
+        return result
+
+    if not output_path.exists():
+        result["status"] = "failed"
+        result["stderr"] = (
+            (completed.stderr or "")
+            + "\npycatia returned success but no output file was created."
+        ).strip()
+        return result
+
+    result["status"] = "converted"
+    result["output_sha256"] = sha256_of(output_path)
+    result["output_size_bytes"] = output_path.stat().st_size
+    if analyze:
+        try:
+            analysis = analyze_output_file(output_path, output_format, assume_unit=assume_unit)
+        except Exception as exc:  # pragma: no cover - defensive reporting
+            result["analysis_error"] = str(exc)
+        else:
+            if analysis is not None:
+                result["analysis"] = analysis
+    return result
+
+
 def convert_one(
     backend: BackendSpec,
     input_path: Path,
@@ -3623,6 +3836,17 @@ def main() -> int:
                     )
                 elif backend.name == "transmagic_command":
                     result = convert_one_with_transmagic(
+                        backend=backend,
+                        input_path=input_path,
+                        output_path=output_path,
+                        output_format=args.format,
+                        overwrite=args.overwrite,
+                        dry_run=args.dry_run,
+                        analyze=not args.skip_analysis,
+                        assume_unit=args.assume_unit,
+                    )
+                elif backend.name == "pycatia_catia_v5":
+                    result = convert_one_with_pycatia(
                         backend=backend,
                         input_path=input_path,
                         output_path=output_path,

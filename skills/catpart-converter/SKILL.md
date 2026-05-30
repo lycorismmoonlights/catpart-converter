@@ -39,7 +39,16 @@ python3 plugins/catpart-converter/scripts/convert_catpart.py "<input.CATPart>" -
 
 This backend generates a CATScript, runs `catstart -run "CNEXT -batch -macro ..."`, exports STEP/IGES/STL, and records CATIA `Product.Analyze` mass, volume, wet area, gravity center, and inertia matrix when CATIA exposes them.
 
-5. If CAD Exchanger Python SDK is installed and licensed, use `--backend cadexsdk`:
+5. If CATIA V5 and pycatia are available on Windows, use `--backend pycatia`:
+
+```bash
+set CATPART_PYCATIA_PYTHON=C:\Python311\python.exe
+python scripts\convert_catpart.py "<input.CATPart>" --backend pycatia --format step
+```
+
+This backend calls `scripts/pycatia_convert.py`, opens the CATPart through CATIA V5 COM automation, exports STEP/IGES/STL, and records CATIA `Product.Analyze` mass, volume, wet area, gravity center, and inertia matrix.
+
+6. If CAD Exchanger Python SDK is installed and licensed, use `--backend cadexsdk`:
 
 ```bash
 CATPART_CADEX_SDK_PYTHON="/path/to/python3.11" \
@@ -49,7 +58,7 @@ python3 plugins/catpart-converter/scripts/convert_catpart.py "<input.CATPart>" -
 
 This backend calls `scripts/cadex_sdk_transfer.py`, which follows CAD Exchanger's SDK `ModelData_ModelReader` to `ModelData_ModelWriter` conversion flow.
 
-6. If Datakit CrossManager CLI is installed, use `--backend datakit` with `CATPART_DATKIT_BIN` and a command template from the installed product:
+7. If Datakit CrossManager CLI is installed, use `--backend datakit` with `CATPART_DATKIT_BIN` and a command template from the installed product:
 
 ```bash
 CATPART_DATKIT_BIN="/path/to/CrossManagerCLI" \
@@ -57,21 +66,21 @@ CATPART_DATKIT_TEMPLATE='"{executable}" --input "{input}" --output "{output}"' \
 python3 plugins/catpart-converter/scripts/convert_catpart.py "<input.CATPart>" --backend datakit --format step
 ```
 
-7. If HOOPS Exchange is installed, licensed, and the `ImportExport` sample is built, use `--backend hoops`:
+8. If HOOPS Exchange is installed, licensed, and the `ImportExport` sample is built, use `--backend hoops`:
 
 ```bash
 CATPART_HOOPS_IMPORTEXPORT_BIN="/path/to/HOOPS_Exchange/samples/exchange/exchangesource/ImportExport/ImportExport" \
 python3 plugins/catpart-converter/scripts/convert_catpart.py "<input.CATPart>" --backend hoops --format step
 ```
 
-8. If 3D-Tool NativeCAD Converter is installed on Windows, use `--backend 3dtool`:
+9. If 3D-Tool NativeCAD Converter is installed on Windows, use `--backend 3dtool`:
 
 ```bash
 set CATPART_THREEDTOOL_BIN=C:\Program Files\3D-Tool V17\Convert.exe
 python scripts\convert_catpart.py "<input.CATPart>" --backend 3dtool --format step
 ```
 
-9. If TransMagic COMMAND is installed on Windows, use `--backend transmagic`:
+10. If TransMagic COMMAND is installed on Windows, use `--backend transmagic`:
 
 ```bash
 set CATPART_TRANSMAGIC_BIN=C:\Program Files\TransMagic Inc\TransMagic RXX\System\code\bin\TMCmd.exe
@@ -80,7 +89,7 @@ python scripts\convert_catpart.py "<input.CATPart>" --backend transmagic --forma
 
 This backend uses the documented `TMCmd` command-line flow and requests XML mass, bounding-box, and surface-area reports when available.
 
-10. If CoreTechnologie 3D_Evolution, Enterprise Data Manager, or a 3D_Kernel_IO wrapper is installed, use `--backend coretechnologie` with `CATPART_CORETECHNOLOGIE_BIN` and a command template from the installed product:
+11. If CoreTechnologie 3D_Evolution, Enterprise Data Manager, or a 3D_Kernel_IO wrapper is installed, use `--backend coretechnologie` with `CATPART_CORETECHNOLOGIE_BIN` and a command template from the installed product:
 
 ```bash
 CATPART_CORETECHNOLOGIE_BIN="/path/to/3D_Evolution" \
@@ -88,11 +97,11 @@ CATPART_CORETECHNOLOGIE_TEMPLATE='"{executable}" --input "{input}" --output "{ou
 python3 plugins/catpart-converter/scripts/convert_catpart.py "<input.CATPart>" --backend coretechnologie --format step
 ```
 
-11. If the conversion succeeds, read the terminal summary or JSON report first.
-12. For `STEP`, prefer the generated engineering summary first. It combines textual metadata, broad value-type scanning, and exact `FreeCAD` geometry measurements when `freecadcmd` is available.
-13. For existing `BREP` or `IGES` files, use `--analysis-only` to get exact topology, area, volume, center of gravity, and bounding box measurements.
-14. If the backend is missing for `.CATPart`, explain that the plugin is installed but still needs an external CATIA-capable converter backend.
-15. When a report contains `diagnostics`, use it to distinguish missing native CATPart conversion from available local FreeCAD analysis/conversion of existing exchange files.
+12. If the conversion succeeds, read the terminal summary or JSON report first.
+13. For `STEP`, prefer the generated engineering summary first. It combines textual metadata, broad value-type scanning, and exact `FreeCAD` geometry measurements when `freecadcmd` is available.
+14. For existing `BREP` or `IGES` files, use `--analysis-only` to get exact topology, area, volume, center of gravity, and bounding box measurements.
+15. If the backend is missing for `.CATPart`, explain that the plugin is installed but still needs an external CATIA-capable converter backend.
+16. When a report contains `diagnostics`, use it to distinguish missing native CATPart conversion from available local FreeCAD analysis/conversion of existing exchange files.
 
 ## Backend setup
 
@@ -101,13 +110,14 @@ The script will auto-detect a backend in this order:
 1. `CATPART_CONVERTER_TEMPLATE`
 2. `CATPART_CONVERTER_BIN`
 3. `CATPART_CATIA_CATSTART_BIN` / common CATIA `catstart` locations
-4. `CATPART_DATKIT_BIN` plus `CATPART_DATKIT_TEMPLATE` / common Datakit CrossManager CLI names and paths
-5. `CATPART_HOOPS_IMPORTEXPORT_BIN` / common HOOPS Exchange `ImportExport` sample paths
-6. `CATPART_THREEDTOOL_BIN` / common 3D-Tool `Convert.exe` paths
-7. `CATPART_TRANSMAGIC_BIN` / common TransMagic COMMAND `TMCmd` paths
-8. `CATPART_CORETECHNOLOGIE_BIN` plus `CATPART_CORETECHNOLOGIE_TEMPLATE` / common CoreTechnologie paths
-9. `CATPART_CADEX_SDK_PYTHON` plus `CATPART_CADEX_LICENSE` / `CATPART_CADEX_LICENSE_FILE`
-10. common `CAD Exchanger` executable names and paths
+4. `CATPART_PYCATIA_PYTHON` with CATIA V5 COM automation available
+5. `CATPART_DATKIT_BIN` plus `CATPART_DATKIT_TEMPLATE` / common Datakit CrossManager CLI names and paths
+6. `CATPART_HOOPS_IMPORTEXPORT_BIN` / common HOOPS Exchange `ImportExport` sample paths
+7. `CATPART_THREEDTOOL_BIN` / common 3D-Tool `Convert.exe` paths
+8. `CATPART_TRANSMAGIC_BIN` / common TransMagic COMMAND `TMCmd` paths
+9. `CATPART_CORETECHNOLOGIE_BIN` plus `CATPART_CORETECHNOLOGIE_TEMPLATE` / common CoreTechnologie paths
+10. `CATPART_CADEX_SDK_PYTHON` plus `CATPART_CADEX_LICENSE` / `CATPART_CADEX_LICENSE_FILE`
+11. common `CAD Exchanger` executable names and paths
 
 For exact `STEP`, `BREP`, and `IGES` geometry analysis it will also auto-detect `freecadcmd` from:
 
@@ -134,7 +144,7 @@ If no CATPart-capable backend is found, `--probe` returns structured diagnostics
 - Exact `FreeCAD` summaries can include per-solid details, shell details, static moments, inertia matrices, and principal inertia properties when available.
 - `STEP` text summaries include numeric ranges and value-type counts for integers, reals, scientific notation, logicals, enumerations, references, strings, omitted values, and derived values.
 - Local FreeCAD conversion can convert existing `STEP/STP/BREP/IGES/IGS` inputs to `STEP/STP/BREP/IGES/IGS/STL/OBJ` when `--backend auto` is used.
-- `--probe` reports candidate native CATPart backends for CATIA V5 batch, CAD Exchanger Python SDK, Datakit CrossManager CLI, HOOPS Exchange ImportExport, 3D-Tool NativeCAD Converter, TransMagic COMMAND, CoreTechnologie 3D_Evolution, and CAD Exchanger Batch.
+- `--probe` reports candidate native CATPart backends for CATIA V5 batch, pycatia COM automation, CAD Exchanger Python SDK, Datakit CrossManager CLI, HOOPS Exchange ImportExport, 3D-Tool NativeCAD Converter, TransMagic COMMAND, CoreTechnologie 3D_Evolution, and CAD Exchanger Batch.
 - `--probe` reports manual CATPart routes such as Autodesk Fusion separately from automatic backends; do not treat a manual route as plugin-level conversion availability.
 - Datakit, HOOPS, 3D-Tool, and CoreTechnologie are conversion backends only in this plugin unless their configured reports expose mass properties. Exact native mass/volume still requires CATIA `Product.Analyze`, TransMagic XML mass reports, vendor-specific reports, or a successful STEP/BREP/IGES export followed by FreeCAD analysis.
 - Use `--analysis-only` when the user already has a converted `STEP`, `OBJ`, `STL`, `BREP`, or `IGES`.

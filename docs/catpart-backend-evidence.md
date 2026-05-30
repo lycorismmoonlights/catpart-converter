@@ -18,6 +18,7 @@ Available:
 Missing:
 
 - CATIA V5 `catstart`
+- pycatia plus CATIA V5 COM automation
 - CAD Exchanger Batch / `ExchangerConv`
 - CAD Exchanger Python SDK package/license
 - Datakit CrossManager CLI
@@ -33,6 +34,7 @@ Missing:
 | Backend | Local STEP path | Exact native mass/volume path | Platform notes | Plugin status |
 | --- | --- | --- | --- | --- |
 | CATIA V5 batch | Yes, through CATIA `ExportData` | Yes, through CATIA `Product.Analyze` | Requires CATIA V5 and licenses | Implemented as `--backend catia` |
+| pycatia + CATIA V5 COM | Yes, through pycatia `document.export_data(..., "stp")` | Yes, through pycatia `product.analyze.mass`, `volume`, `wet_area`, `get_gravity_center`, and `get_inertia` | Windows CATIA workstation route; requires CATIA V5 COM automation and pycatia | Implemented as `--backend pycatia` |
 | CAD Exchanger Batch | Yes, through `ExchangerConv -i input -e output` CLI | No native mass path exposed here; analyze exported STEP/BREP/IGES | Commercial, macOS/Windows/Linux product family; FreeCAD add-on docs confirm 30-day evaluation and `ExchangerConv` on Linux/macOS, `ExchangerConv.exe` on Windows | Implemented as `--backend cadexchanger` / built-in template |
 | CAD Exchanger Python SDK | Yes, through SDK `ModelData_ModelReader` to `ModelData_ModelWriter` conversion | SDK product pages advertise analysis/measurement APIs including volumes, surface areas, centroids, and bounding boxes; this plugin currently uses the SDK for conversion and then FreeCAD for exact STEP/BREP/IGES metrics | Commercial SDK; examples require CAD Exchanger SDK package, evaluation/commercial license, and CPython 3.7-3.11 on macOS Apple Silicon | Implemented as `--backend cadexsdk` |
 | Datakit CrossManager CLI | Yes, if licensed and command template is supplied | No native mass path exposed here; analyze exported STEP/BREP/IGES | Commercial; 2026 product note says no-GUI CLI runs on Windows, Linux, and macOS; public pages do not expose stable CLI syntax | Implemented as `--backend datakit` |
@@ -80,6 +82,9 @@ python3 scripts/convert_catpart.py --probe
 - CAD Exchanger Python SDK transfer example: https://github.com/cadexchanger/cadexchanger-sdk-python-examples/blob/main/conversion/transfer/transfer.py
 - CAD Exchanger FreeCAD add-on evidence: https://github.com/yorikvanhavre/CADExchanger
 - CAD Exchanger CLI command example: https://www.skypack.dev/view/cadex
+- pycatia examples showing open/export and product analysis: https://pycatia.readthedocs.io/en/0.3.7/examples.html
+- pycatia Product Analyze API: https://pycatia.readthedocs.io/en/0.93/api/pycatia/product_structure_interfaces/analyze.html
+- pycatia Document export_data API: https://pycatia.readthedocs.io/en/0.8.1/api/pycatia/in_interfaces/document.html
 - CADfix: https://www.cadinterop.com/en/our-products/cadfix.html
 - Autodesk Fusion file formats: https://www.autodesk.com/support/technical/article/caas/sfdcarticles/sfdcarticles/File-formats-supported-by-Fusion-360.html
 - Autodesk Fusion export formats: https://www.autodesk.com/support/technical/article/caas/sfdcarticles/sfdcarticles/Export-format-options-for-Fusion-360.html
