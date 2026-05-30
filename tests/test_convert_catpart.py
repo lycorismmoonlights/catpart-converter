@@ -179,6 +179,100 @@ class ConvertCatpartTests(unittest.TestCase):
             convert_catpart.CAD_EXCHANGER_PATHS,
         )
 
+    def test_resolve_cadexsdk_backend_from_env_license(self) -> None:
+        original_python = os.environ.get("CATPART_CADEX_SDK_PYTHON")
+        original_license = os.environ.get("CATPART_CADEX_LICENSE")
+        original_license_file = os.environ.get("CATPART_CADEX_LICENSE_FILE")
+        os.environ["CATPART_CADEX_SDK_PYTHON"] = "/bin/echo"
+        os.environ["CATPART_CADEX_LICENSE"] = "dummy-license"
+        os.environ.pop("CATPART_CADEX_LICENSE_FILE", None)
+        try:
+            args = argparse.Namespace(
+                backend="cadexsdk",
+                backend_executable=None,
+                backend_cmd=None,
+            )
+
+            backend = convert_catpart.resolve_backend(args)
+        finally:
+            if original_python is None:
+                os.environ.pop("CATPART_CADEX_SDK_PYTHON", None)
+            else:
+                os.environ["CATPART_CADEX_SDK_PYTHON"] = original_python
+            if original_license is None:
+                os.environ.pop("CATPART_CADEX_LICENSE", None)
+            else:
+                os.environ["CATPART_CADEX_LICENSE"] = original_license
+            if original_license_file is None:
+                os.environ.pop("CATPART_CADEX_LICENSE_FILE", None)
+            else:
+                os.environ["CATPART_CADEX_LICENSE_FILE"] = original_license_file
+
+        self.assertEqual(backend.name, "cad_exchanger_python_sdk")
+        self.assertEqual(backend.executable, "/bin/echo")
+        self.assertIn("{cadex_sdk_script}", backend.template)
+
+    def test_resolve_cadexsdk_requires_license(self) -> None:
+        original_python = os.environ.get("CATPART_CADEX_SDK_PYTHON")
+        original_license = os.environ.get("CATPART_CADEX_LICENSE")
+        original_license_file = os.environ.get("CATPART_CADEX_LICENSE_FILE")
+        original_license_probe = convert_catpart.cadex_sdk_license_configured
+        os.environ["CATPART_CADEX_SDK_PYTHON"] = "/bin/echo"
+        os.environ.pop("CATPART_CADEX_LICENSE", None)
+        os.environ.pop("CATPART_CADEX_LICENSE_FILE", None)
+        convert_catpart.cadex_sdk_license_configured = lambda: False
+        try:
+            args = argparse.Namespace(
+                backend="cadexsdk",
+                backend_executable=None,
+                backend_cmd=None,
+            )
+
+            with self.assertRaises(convert_catpart.BackendNotFoundError):
+                convert_catpart.resolve_backend(args)
+        finally:
+            convert_catpart.cadex_sdk_license_configured = original_license_probe
+            if original_python is None:
+                os.environ.pop("CATPART_CADEX_SDK_PYTHON", None)
+            else:
+                os.environ["CATPART_CADEX_SDK_PYTHON"] = original_python
+            if original_license is None:
+                os.environ.pop("CATPART_CADEX_LICENSE", None)
+            else:
+                os.environ["CATPART_CADEX_LICENSE"] = original_license
+            if original_license_file is None:
+                os.environ.pop("CATPART_CADEX_LICENSE_FILE", None)
+            else:
+                os.environ["CATPART_CADEX_LICENSE_FILE"] = original_license_file
+
+    def test_cadexsdk_dry_run_builds_helper_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "model.CATPart"
+            output_path = temp_path / "model.step"
+            input_path.write_text("placeholder", encoding="utf-8")
+            backend = convert_catpart.BackendSpec(
+                name="cad_exchanger_python_sdk",
+                executable="/bin/echo",
+                template=convert_catpart.CADEX_SDK_TEMPLATE,
+                detected_via="test",
+            )
+
+            result = convert_catpart.convert_one(
+                backend=backend,
+                input_path=input_path,
+                output_path=output_path,
+                output_format="step",
+                overwrite=False,
+                dry_run=True,
+                analyze=False,
+                assume_unit=None,
+            )
+
+        self.assertEqual(result["status"], "dry_run")
+        self.assertEqual(result["backend"], "cad_exchanger_python_sdk")
+        self.assertIn(str(convert_catpart.CADEX_SDK_TRANSFER_SCRIPT), result["command"])
+
     def test_resolve_custom_template_requires_executable_when_placeholder_is_used(self) -> None:
         args = argparse.Namespace(
             backend="custom",
@@ -218,6 +312,7 @@ class ConvertCatpartTests(unittest.TestCase):
         self.assertIn("three_d_tool", candidates)
         self.assertIn("transmagic_command", candidates)
         self.assertIn("coretechnologie_3d_evolution", candidates)
+        self.assertIn("cad_exchanger_python_sdk", candidates)
         self.assertIn("cad_exchanger_batch", candidates)
 
     def test_datakit_probe_searches_cli_app_paths(self) -> None:

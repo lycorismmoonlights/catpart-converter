@@ -6,6 +6,7 @@ The plugin itself does not reverse-engineer CATPart directly. Instead, it wraps 
 
 - Recommended readable output: `STEP` (`.step` / `.stp`)
 - Native CATIA path: if CATIA V5 `catstart` is installed, `--backend catia` can run a generated CATScript to export `.CATPart` and collect native `Product.Analyze` mass properties
+- CAD Exchanger SDK path: if the CAD Exchanger Python SDK package and license are configured, `--backend cadexsdk` can run the SDK `ModelReader -> ModelWriter` flow for CATIA V5 to STEP and other exchange outputs
 - Datakit path: if Datakit CrossManager CLI is installed and its command template is provided, `--backend datakit` can be used for CATIA V5 to STEP conversion
 - HOOPS path: if the HOOPS Exchange SDK `ImportExport` sample is built and licensed, `--backend hoops` can use its `ImportExport input output` command shape for CATIA V5 file-to-file conversion
 - 3D-Tool path: on Windows with 3D-Tool NativeCAD Converter installed, `--backend 3dtool` uses the documented `Convert.exe -i ... -o ...` batch interface
@@ -105,6 +106,16 @@ export CATPART_CATIA_ENV="CATIA.V5Rxx"
 export CATPART_CATIA_DIRENV="/path/to/CATEnv"
 ```
 
+Use CAD Exchanger Python SDK when licensed and installed:
+
+```bash
+export CATPART_CADEX_SDK_PYTHON="/path/to/python3.11"
+export CATPART_CADEX_LICENSE_FILE="/path/to/cadex_license.py"
+python3 scripts/convert_catpart.py /path/to/part.CATPart --backend cadexsdk --format step
+```
+
+The CAD Exchanger SDK examples show a Python `ModelData_ModelReader` to `ModelData_ModelWriter` conversion flow. The SDK package and `cadex_license.py` license file are distributed through CAD Exchanger evaluation or Customer Corner, not public PyPI. You can set `CATPART_CADEX_LICENSE` directly instead of `CATPART_CADEX_LICENSE_FILE` if you need a secret-manager style setup.
+
 Use Datakit CrossManager CLI when licensed and installed:
 
 ```bash
@@ -184,25 +195,28 @@ The script supports these backend modes:
 {executable} -i {input} -e {output}
 ```
 
-3. `--backend catia`
+3. `--backend cadexsdk`
+   Uses `scripts/cadex_sdk_transfer.py` with the CAD Exchanger Python SDK package and license.
+
+4. `--backend catia`
    Uses CATIA V5 batch automation through `catstart`.
 
-4. `--backend datakit`
+5. `--backend datakit`
    Uses Datakit CrossManager CLI with a configured command template.
 
-5. `--backend hoops`
+6. `--backend hoops`
    Uses the HOOPS Exchange `ImportExport` sample command shape.
 
-6. `--backend 3dtool`
+7. `--backend 3dtool`
    Uses 3D-Tool NativeCAD Converter on Windows.
 
-7. `--backend transmagic`
+8. `--backend transmagic`
    Uses TransMagic COMMAND / `TMCmd` on Windows and parses generated XML mass-property reports when present.
 
-8. `--backend coretechnologie`
+9. `--backend coretechnologie`
    Uses CoreTechnologie 3D_Evolution, Enterprise Data Manager, or a 3D_Kernel_IO wrapper with a configured command template.
 
-9. `--backend custom`
+10. `--backend custom`
    Uses your exact command template.
 
 You can configure the backend with environment variables:
@@ -227,6 +241,15 @@ You can configure the backend with environment variables:
 
 - `CATPART_CATIA_TIMEOUT_SECONDS`
   Optional timeout for CATIA batch conversion. Defaults to `300` seconds.
+
+- `CATPART_CADEX_SDK_PYTHON`
+  Optional Python executable where the CAD Exchanger SDK `cadexchanger` package is installed. Enables `--backend cadexsdk` when a license is also configured.
+
+- `CATPART_CADEX_LICENSE`
+  Optional CAD Exchanger SDK license key string for `--backend cadexsdk`.
+
+- `CATPART_CADEX_LICENSE_FILE`
+  Optional path to a CAD Exchanger SDK license text file or `cadex_license.py` file.
 
 - `CATPART_DATKIT_BIN`
   Optional absolute path to Datakit CrossManager CLI.
@@ -286,6 +309,7 @@ python3 scripts/convert_catpart.py /path/to/part.CATPart
 - If no backend is installed, the script exits with a clear setup message instead of failing silently.
 - Missing CATPart backends are reported with structured diagnostics, including current FreeCAD capabilities, supported local exchange formats, example external backends, and `CATPART_CONVERTER_BIN` / `CATPART_CONVERTER_TEMPLATE` setup hints.
 - `--backend catia` uses CATIA V5 batch automation through `catstart -run "CNEXT -batch -macro ..."`. It is the preferred path for native CATPart mass/volume when CATIA and the needed licenses are installed locally.
+- `--backend cadexsdk` uses CAD Exchanger's Python SDK conversion API when the private SDK package and license are configured. It is a direct SDK route rather than the `ExchangerConv` batch executable.
 - `--backend datakit`, `--backend hoops`, `--backend 3dtool`, `--backend transmagic`, and `--backend coretechnologie` cover additional real-world CATPart converters discovered from vendor documentation. `--probe` reports their environment variables and whether they are detected.
 - `--backend transmagic` can add `native_transmagic_analysis` from generated XML mass, bounding-box, and surface-area reports when TransMagic COMMAND creates them.
 - `--probe` also separates manual GUI routes such as Autodesk Fusion from automatic backends, so Fusion can be tracked without being misreported as a headless converter.

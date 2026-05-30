@@ -19,6 +19,7 @@ Missing:
 
 - CATIA V5 `catstart`
 - CAD Exchanger Batch / `ExchangerConv`
+- CAD Exchanger Python SDK package/license
 - Datakit CrossManager CLI
 - HOOPS Exchange `ImportExport`
 - 3D-Tool `Convert.exe`
@@ -33,6 +34,7 @@ Missing:
 | --- | --- | --- | --- | --- |
 | CATIA V5 batch | Yes, through CATIA `ExportData` | Yes, through CATIA `Product.Analyze` | Requires CATIA V5 and licenses | Implemented as `--backend catia` |
 | CAD Exchanger Batch | Yes, through `ExchangerConv -i input -e output` CLI | No native mass path exposed here; analyze exported STEP/BREP/IGES | Commercial, macOS/Windows/Linux product family; FreeCAD add-on docs confirm 30-day evaluation and `ExchangerConv` on Linux/macOS, `ExchangerConv.exe` on Windows | Implemented as `--backend cadexchanger` / built-in template |
+| CAD Exchanger Python SDK | Yes, through SDK `ModelData_ModelReader` to `ModelData_ModelWriter` conversion | SDK product pages advertise analysis/measurement APIs including volumes, surface areas, centroids, and bounding boxes; this plugin currently uses the SDK for conversion and then FreeCAD for exact STEP/BREP/IGES metrics | Commercial SDK; examples require CAD Exchanger SDK package, evaluation/commercial license, and CPython 3.7-3.11 on macOS Apple Silicon | Implemented as `--backend cadexsdk` |
 | Datakit CrossManager CLI | Yes, if licensed and command template is supplied | No native mass path exposed here; analyze exported STEP/BREP/IGES | Commercial; 2026 product note says no-GUI CLI runs on Windows, Linux, and macOS; public pages do not expose stable CLI syntax | Implemented as `--backend datakit` |
 | HOOPS Exchange ImportExport | Yes, if SDK sample is built and licensed | SDK can expose B-Rep/metadata; exact mass extraction would need a dedicated SDK wrapper | Commercial SDK; macOS sample path documented | Implemented as `--backend hoops` |
 | 3D-Tool NativeCAD Converter | Yes, through `Convert.exe -i ... -o ...` | No native mass path exposed here; analyze exported STEP/BREP/IGES | Windows-only commercial tool | Implemented as `--backend 3dtool` |
@@ -73,6 +75,9 @@ python3 scripts/convert_catpart.py --probe
 
 - CAD Assistant: https://www.opencascade.com/products/cad-assistant/
 - CAD Exchanger formats: https://cadexchanger.com/formats/
+- CAD Exchanger SDK product page: https://cadexchanger.com/products/sdk/
+- CAD Exchanger Python SDK examples: https://github.com/cadexchanger/cadexchanger-sdk-python-examples
+- CAD Exchanger Python SDK transfer example: https://github.com/cadexchanger/cadexchanger-sdk-python-examples/blob/main/conversion/transfer/transfer.py
 - CAD Exchanger FreeCAD add-on evidence: https://github.com/yorikvanhavre/CADExchanger
 - CAD Exchanger CLI command example: https://www.skypack.dev/view/cadex
 - CADfix: https://www.cadinterop.com/en/our-products/cadfix.html

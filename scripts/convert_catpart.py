@@ -193,6 +193,7 @@ FREECAD_JSON_PREFIX = "JSON_RESULT="
 FREECAD_INPUT_ENV_NAMES = ("CATPART_EXACT_GEOMETRY_INPUT", "CATPART_STEP_INPUT")
 FREECAD_MEASURE_SCRIPT = Path(__file__).with_name("freecad_measure_step.py")
 FREECAD_CONVERT_SCRIPT = Path(__file__).with_name("freecad_convert.py")
+CADEX_SDK_TRANSFER_SCRIPT = Path(__file__).with_name("cadex_sdk_transfer.py")
 DEFAULT_FREECAD_TIMEOUT_SECONDS = 45.0
 DEFAULT_DETAIL_LIMIT = 100
 DEFAULT_CATIA_TIMEOUT_SECONDS = 300.0
@@ -246,6 +247,7 @@ LENGTH_UNIT_ALIASES = {
 }
 
 CAD_EXCHANGER_TEMPLATE = '"{executable}" -i "{input}" -e "{output}"'
+CADEX_SDK_TEMPLATE = '"{executable}" "{cadex_sdk_script}" "{input}" "{output}"'
 CATIA_BATCH_TEMPLATE = '"{executable}" -run "CNEXT -batch -macro {macro}"'
 HOOPS_IMPORTEXPORT_TEMPLATE = '"{executable}" "{input}" "{output}"'
 THREED_TOOL_TEMPLATE = '"{executable}" -i "{input}" -o "{output}"'
@@ -337,6 +339,7 @@ def parse_args() -> argparse.Namespace:
         "--backend",
         choices=(
             "auto",
+            "cadexsdk",
             "cadexchanger",
             "catia",
             "datakit",
@@ -356,7 +359,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--backend-cmd",
         help=(
-            "Command template. Supported placeholders: {executable}, {input}, {output}, {format}."
+            "Command template. Supported placeholders include {executable}, {input}, "
+            "{output}, {format}, {output_dir}, and {cadex_sdk_script}."
         ),
     )
     parser.add_argument(
@@ -411,7 +415,27 @@ def normalize_path(path_value: str | Path) -> str:
 
 
 def module_is_available(module_name: str) -> bool:
-    return importlib.util.find_spec(module_name) is not None
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def cadex_sdk_license_configured() -> bool:
+    if os.environ.get("CATPART_CADEX_LICENSE", "").strip():
+        return True
+    if os.environ.get("CATPART_CADEX_LICENSE_FILE", "").strip():
+        return True
+    return module_is_available("cadex_license")
+
+
+def cadex_sdk_python_executable() -> tuple[str | None, str | None]:
+    env_python = os.environ.get("CATPART_CADEX_SDK_PYTHON")
+    if env_python:
+        return normalize_path(env_python), "ENV:CATPART_CADEX_SDK_PYTHON"
+    if module_is_available("cadexchanger"):
+        return normalize_path(sys.executable), "CURRENT_PYTHON:cadexchanger"
+    return None, None
 
 
 def round_number(value: float, digits: int = 6) -> float:
@@ -2019,6 +2043,43 @@ def discover_coretechnologie_backend() -> dict[str, Any]:
     }
 
 
+def discover_cadexchanger_python_sdk_backend() -> dict[str, Any]:
+    python_executable, detected_via = cadex_sdk_python_executable()
+    license_configured = cadex_sdk_license_configured()
+    module_available_current_python = module_is_available("cadexchanger")
+    helper_available = CADEX_SDK_TRANSFER_SCRIPT.exists()
+
+    return {
+        "available": bool(python_executable and license_configured and helper_available),
+        "name": "cad_exchanger_python_sdk",
+        "executable": python_executable,
+        "detected_via": detected_via,
+        "template": CADEX_SDK_TEMPLATE if python_executable else None,
+        "helper_script": str(CADEX_SDK_TRANSFER_SCRIPT),
+        "helper_script_available": helper_available,
+        "python_module_available_current_interpreter": module_available_current_python,
+        "license_configured": license_configured,
+        "supported_output_formats": sorted(FORMAT_EXTENSIONS),
+        "native_properties": [
+            "B-Rep geometry",
+            "assembly structure",
+            "metadata and PMI exposed by the SDK",
+            "volumes, surface areas, centroids, and bounding boxes via SDK measurement APIs",
+        ],
+        "requires": [
+            "CAD Exchanger SDK Python package installed in CATPART_CADEX_SDK_PYTHON or current Python",
+            "CAD Exchanger SDK evaluation or commercial license",
+            "CATIA V5 input support",
+            "Requested output format support such as STEP",
+        ],
+        "environment": {
+            "CATPART_CADEX_SDK_PYTHON": os.environ.get("CATPART_CADEX_SDK_PYTHON"),
+            "CATPART_CADEX_LICENSE": bool(os.environ.get("CATPART_CADEX_LICENSE")),
+            "CATPART_CADEX_LICENSE_FILE": os.environ.get("CATPART_CADEX_LICENSE_FILE"),
+        },
+    }
+
+
 def discover_fusion_manual_route() -> dict[str, Any]:
     discovered: tuple[str, str] | None = None
     for candidate in FUSION_APP_PATHS:
@@ -2056,6 +2117,7 @@ def discover_native_backend_candidates() -> dict[str, Any]:
         "three_d_tool": discover_3dtool_backend(),
         "transmagic_command": discover_transmagic_backend(),
         "coretechnologie_3d_evolution": discover_coretechnologie_backend(),
+        "cad_exchanger_python_sdk": discover_cadexchanger_python_sdk_backend(),
         "cad_exchanger_batch": {
             "available": discover_executable(CAD_EXCHANGER_EXECUTABLES, CAD_EXCHANGER_PATHS)
             is not None,
@@ -2123,6 +2185,7 @@ def catpart_backend_diagnostics(
             "3D-Tool NativeCAD Converter",
             "TransMagic COMMAND / TMCmd",
             "CoreTechnologie 3D_Evolution / 3D_Kernel_IO",
+            "CAD Exchanger Python SDK",
             "Any local converter callable with {input} and {output}",
         ],
         "catia_batch_backend": catia_batch_backend,
@@ -2145,6 +2208,9 @@ def catpart_backend_diagnostics(
             "CATPART_TRANSMAGIC_TEMPLATE": "Optional TransMagic command template using {executable}, {input}, {output}, {output_dir}, and {transmagic_format}.",
             "CATPART_CORETECHNOLOGIE_BIN": "Absolute path to CoreTechnologie 3D_Evolution, Enterprise Data Manager, or a 3D_Kernel_IO sample wrapper.",
             "CATPART_CORETECHNOLOGIE_TEMPLATE": "CoreTechnologie command template using {executable}, {input}, {output}, and {format}.",
+            "CATPART_CADEX_SDK_PYTHON": "Optional Python executable with CAD Exchanger SDK package installed for --backend cadexsdk.",
+            "CATPART_CADEX_LICENSE": "CAD Exchanger SDK license key string for --backend cadexsdk.",
+            "CATPART_CADEX_LICENSE_FILE": "Path to a CAD Exchanger SDK license text file or cadex_license.py.",
         },
         "example_commands": [
             'export CATPART_CONVERTER_BIN="/absolute/path/to/ExchangerConv"',
@@ -2160,6 +2226,9 @@ def catpart_backend_diagnostics(
             'python3 scripts/convert_catpart.py part.CATPart --backend transmagic --format step',
             'export CATPART_CORETECHNOLOGIE_BIN="/path/to/3D_Evolution"',
             'export CATPART_CORETECHNOLOGIE_TEMPLATE=\'"{executable}" --input "{input}" --output "{output}"\'',
+            'export CATPART_CADEX_SDK_PYTHON="/path/to/python3.11"',
+            'export CATPART_CADEX_LICENSE_FILE="/path/to/cadex_license.py"',
+            'python3 scripts/convert_catpart.py part.CATPart --backend cadexsdk --format step',
         ],
         "current_limitation": (
             "Without a CATPart-capable backend, this plugin can analyze existing STEP, "
@@ -2281,6 +2350,8 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
         or os.environ.get("CATPART_CORETECHNOLOGIE_TEMPLATE")
         or env_template
     )
+    cadexsdk_python = args.backend_executable or os.environ.get("CATPART_CADEX_SDK_PYTHON")
+    cadexsdk_detected_via = "CLI_OR_ENV_CADEX_SDK_PYTHON"
 
     if args.backend == "custom":
         if not template_override:
@@ -2507,6 +2578,43 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
             detected_via=coretechnologie_detected_via,
         )
 
+    if args.backend in {"auto", "cadexsdk"} and not executable_override and not template_override:
+        cadexsdk_backend = discover_cadexchanger_python_sdk_backend()
+        if cadexsdk_backend["available"]:
+            return BackendSpec(
+                name="cad_exchanger_python_sdk",
+                executable=str(cadexsdk_backend["executable"]),
+                template=CADEX_SDK_TEMPLATE,
+                detected_via=str(cadexsdk_backend["detected_via"]),
+            )
+
+    if args.backend == "cadexsdk":
+        if not cadexsdk_python:
+            cadexsdk_python, detected_via = cadex_sdk_python_executable()
+            cadexsdk_detected_via = detected_via or cadexsdk_detected_via
+        if not cadexsdk_python:
+            raise BackendNotFoundError(
+                "CAD Exchanger Python SDK backend requested but the cadexchanger Python "
+                "package was not found. Set --backend-executable or CATPART_CADEX_SDK_PYTHON "
+                "to a Python interpreter where the CAD Exchanger SDK package is installed."
+            )
+        if not CADEX_SDK_TRANSFER_SCRIPT.exists():
+            raise BackendNotFoundError(
+                f"CAD Exchanger Python SDK helper script is missing: {CADEX_SDK_TRANSFER_SCRIPT}"
+            )
+        if not cadex_sdk_license_configured():
+            raise BackendNotFoundError(
+                "CAD Exchanger Python SDK backend requested but no license was configured. "
+                "Set CATPART_CADEX_LICENSE, CATPART_CADEX_LICENSE_FILE, or provide "
+                "cadex_license.py on PYTHONPATH."
+            )
+        return BackendSpec(
+            name="cad_exchanger_python_sdk",
+            executable=normalize_path(cadexsdk_python),
+            template=CADEX_SDK_TEMPLATE,
+            detected_via=cadexsdk_detected_via,
+        )
+
     if args.backend in {"auto", "cadexchanger"}:
         if executable_override:
             executable = normalize_path(executable_override)
@@ -2534,11 +2642,12 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
         "Recommended setup:\n"
         "1. Install a converter backend such as CAD Exchanger Batch, Datakit CrossManager CLI, "
         "HOOPS Exchange ImportExport, 3D-Tool NativeCAD Converter, TransMagic COMMAND, "
-        "CoreTechnologie 3D_Evolution, or use CATIA V5 batch mode.\n"
+        "CoreTechnologie 3D_Evolution, CAD Exchanger Python SDK, or use CATIA V5 batch mode.\n"
         "2. Set CATPART_CONVERTER_BIN to a converter executable, CATPART_CATIA_CATSTART_BIN "
         "to CATIA catstart, CATPART_DATKIT_BIN plus CATPART_DATKIT_TEMPLATE, or "
         "CATPART_HOOPS_IMPORTEXPORT_BIN, CATPART_THREEDTOOL_BIN, CATPART_TRANSMAGIC_BIN, "
-        "or CATPART_CORETECHNOLOGIE_BIN plus CATPART_CORETECHNOLOGIE_TEMPLATE.\n"
+        "CATPART_CORETECHNOLOGIE_BIN plus CATPART_CORETECHNOLOGIE_TEMPLATE, or "
+        "CATPART_CADEX_SDK_PYTHON plus CATPART_CADEX_LICENSE_FILE.\n"
         "3. Optionally set CATPART_CONVERTER_TEMPLATE if your converter uses different flags.\n\n"
         "Example:\n"
         '  export CATPART_CONVERTER_BIN="/absolute/path/to/ExchangerConv"\n'
@@ -2548,7 +2657,9 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
         '  export CATPART_HOOPS_IMPORTEXPORT_BIN="/path/to/ImportExport"\n'
         '  export CATPART_THREEDTOOL_BIN="C:/Program Files/3D-Tool V17/Convert.exe"\n'
         '  export CATPART_TRANSMAGIC_BIN="C:/Program Files/TransMagic Inc/TransMagic RXX/System/code/bin/TMCmd.exe"\n'
-        '  export CATPART_CORETECHNOLOGIE_BIN="/path/to/3D_Evolution"'
+        '  export CATPART_CORETECHNOLOGIE_BIN="/path/to/3D_Evolution"\n'
+        '  export CATPART_CADEX_SDK_PYTHON="/path/to/python3.11"\n'
+        '  export CATPART_CADEX_LICENSE_FILE="/path/to/cadex_license.py"'
     )
 
 
@@ -2566,6 +2677,7 @@ def render_command(backend: BackendSpec, input_path: Path, output_path: Path, ou
         "output_suffix": output_path.suffix.lstrip("."),
         "format": output_format,
         "transmagic_format": TRANSMAGIC_OUTPUT_FORMATS.get(output_format, output_format),
+        "cadex_sdk_script": str(CADEX_SDK_TRANSFER_SCRIPT),
     }
     return [segment.format(**values) for segment in shlex.split(backend.template)]
 
