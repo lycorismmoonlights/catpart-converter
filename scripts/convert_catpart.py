@@ -34,6 +34,7 @@ FORMAT_EXTENSIONS = {
     "x_t": ".x_t",
     "x_b": ".x_b",
     "sat": ".sat",
+    "prc": ".prc",
     "gltf": ".gltf",
     "glb": ".glb",
 }
@@ -86,6 +87,15 @@ DATAKIT_CROSSMANAGER_PATHS = [
     "/Applications/Datakit*/CrossManagerCLI",
     "/opt/datakit/*/CrossManagerCLI",
     "C:/Program Files/Datakit/CrossManager*/CrossManagerCLI.exe",
+]
+HOOPS_IMPORTEXPORT_EXECUTABLES = [
+    "ImportExport",
+]
+HOOPS_IMPORTEXPORT_PATHS = [
+    "~/HOOPS_Exchange*/samples/exchange/exchangesource/ImportExport/ImportExport",
+    "~/Downloads/HOOPS_Exchange*/samples/exchange/exchangesource/ImportExport/ImportExport",
+    "/Applications/HOOPS*/samples/exchange/exchangesource/ImportExport/ImportExport",
+    "/opt/TechSoft3D/HOOPS_Exchange*/samples/exchange/exchangesource/ImportExport/ImportExport",
 ]
 THREED_TOOL_EXECUTABLES = [
     "Convert.exe",
@@ -173,6 +183,7 @@ LENGTH_UNIT_ALIASES = {
 
 CAD_EXCHANGER_TEMPLATE = '"{executable}" -i "{input}" -e "{output}"'
 CATIA_BATCH_TEMPLATE = '"{executable}" -run "CNEXT -batch -macro {macro}"'
+HOOPS_IMPORTEXPORT_TEMPLATE = '"{executable}" "{input}" "{output}"'
 THREED_TOOL_TEMPLATE = '"{executable}" -i "{input}" -o "{output}"'
 FLOAT_RE = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[Ee][-+]?\d+)?")
 STEP_NUMBER_START_RE = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?")
@@ -256,7 +267,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--backend",
-        choices=("auto", "cadexchanger", "catia", "datakit", "3dtool", "custom"),
+        choices=("auto", "cadexchanger", "catia", "datakit", "hoops", "3dtool", "custom"),
         default="auto",
         help="Backend selection strategy (default: auto)",
     )
@@ -1784,6 +1795,50 @@ def discover_datakit_crossmanager_backend() -> dict[str, Any]:
     }
 
 
+def discover_hoops_importexport_backend() -> dict[str, Any]:
+    env_executable = os.environ.get("CATPART_HOOPS_IMPORTEXPORT_BIN")
+    env_template = os.environ.get("CATPART_HOOPS_TEMPLATE")
+    discovered: tuple[str, str] | None = None
+    if env_executable:
+        discovered = (normalize_path(env_executable), "ENV:CATPART_HOOPS_IMPORTEXPORT_BIN")
+    else:
+        discovered = discover_executable(HOOPS_IMPORTEXPORT_EXECUTABLES, HOOPS_IMPORTEXPORT_PATHS)
+
+    return {
+        "available": discovered is not None,
+        "name": "hoops_exchange_importexport",
+        "executable": discovered[0] if discovered else None,
+        "detected_via": discovered[1] if discovered else None,
+        "template": env_template or (HOOPS_IMPORTEXPORT_TEMPLATE if discovered else None),
+        "supported_output_formats": [
+            "iges",
+            "igs",
+            "prc",
+            "sat",
+            "step",
+            "stl",
+            "stp",
+            "x_b",
+            "x_t",
+        ],
+        "native_properties": [
+            "B-Rep",
+            "PMI when enabled by HOOPS import parameters",
+            "metadata when exposed by the SDK/sample",
+        ],
+        "requires": [
+            "Installed HOOPS Exchange SDK",
+            "Valid HOOPS Exchange license or evaluation key",
+            "Built ImportExport sample",
+            "CATIA V5 reader support in the licensed SDK package",
+        ],
+        "environment": {
+            "CATPART_HOOPS_IMPORTEXPORT_BIN": env_executable,
+            "CATPART_HOOPS_TEMPLATE": env_template,
+        },
+    }
+
+
 def discover_3dtool_backend() -> dict[str, Any]:
     env_executable = os.environ.get("CATPART_THREEDTOOL_BIN")
     discovered: tuple[str, str] | None = None
@@ -1815,6 +1870,7 @@ def discover_native_backend_candidates() -> dict[str, Any]:
     return {
         "catia_v5_batch": discover_catia_batch_backend(),
         "datakit_crossmanager_cli": discover_datakit_crossmanager_backend(),
+        "hoops_exchange_importexport": discover_hoops_importexport_backend(),
         "three_d_tool": discover_3dtool_backend(),
         "cad_exchanger_batch": {
             "available": discover_executable(CAD_EXCHANGER_EXECUTABLES, CAD_EXCHANGER_PATHS)
@@ -1872,6 +1928,7 @@ def catpart_backend_diagnostics(
             "CAD Exchanger Batch / ExchangerConv",
             "CATIA V5 batch export through catstart/CNEXT/CATScript",
             "Datakit CrossManager CLI",
+            "HOOPS Exchange ImportExport sample",
             "3D-Tool NativeCAD Converter",
             "Any local converter callable with {input} and {output}",
         ],
@@ -1887,6 +1944,8 @@ def catpart_backend_diagnostics(
             "CATPART_CATIA_DIRENV": "Optional CATIA environment directory passed to catstart -direnv.",
             "CATPART_DATKIT_BIN": "Absolute path to Datakit CrossManager CLI executable.",
             "CATPART_DATKIT_TEMPLATE": "Datakit CrossManager CLI command template using {executable}, {input}, {output}, and {format}.",
+            "CATPART_HOOPS_IMPORTEXPORT_BIN": "Absolute path to the built HOOPS Exchange ImportExport sample.",
+            "CATPART_HOOPS_TEMPLATE": "Optional HOOPS ImportExport command template using {executable}, {input}, {output}, and {format}.",
             "CATPART_THREEDTOOL_BIN": "Absolute path to 3D-Tool Convert.exe for --backend 3dtool.",
         },
         "example_commands": [
@@ -1896,6 +1955,8 @@ def catpart_backend_diagnostics(
             'python3 scripts/convert_catpart.py part.CATPart --backend catia --format step',
             'export CATPART_DATKIT_BIN="/absolute/path/to/CrossManagerCLI"',
             'export CATPART_DATKIT_TEMPLATE=\'"{executable}" --input "{input}" --output "{output}"\'',
+            'export CATPART_HOOPS_IMPORTEXPORT_BIN="/path/to/HOOPS_Exchange/samples/exchange/exchangesource/ImportExport/ImportExport"',
+            'python3 scripts/convert_catpart.py part.CATPart --backend hoops --format step',
             'export CATPART_THREEDTOOL_BIN="C:/Program Files/3D-Tool V17/Convert.exe"',
         ],
         "current_limitation": (
@@ -1995,6 +2056,12 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
         or os.environ.get("CATPART_DATKIT_TEMPLATE")
         or env_template
     )
+    hoops_executable = args.backend_executable or os.environ.get("CATPART_HOOPS_IMPORTEXPORT_BIN")
+    hoops_template = (
+        args.backend_cmd
+        or os.environ.get("CATPART_HOOPS_TEMPLATE")
+        or HOOPS_IMPORTEXPORT_TEMPLATE
+    )
     threedtool_executable = args.backend_executable or os.environ.get("CATPART_THREEDTOOL_BIN")
 
     if args.backend == "custom":
@@ -2089,6 +2156,38 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
             detected_via=datakit_detected_via,
         )
 
+    if args.backend in {"auto", "hoops"} and not executable_override and not template_override:
+        hoops_backend = discover_hoops_importexport_backend()
+        if hoops_backend["available"]:
+            return BackendSpec(
+                name="hoops_exchange_importexport",
+                executable=str(hoops_backend["executable"]),
+                template=str(hoops_backend["template"]),
+                detected_via=str(hoops_backend["detected_via"]),
+            )
+
+    if args.backend == "hoops":
+        hoops_detected_via = "CLI_OR_ENV_HOOPS_IMPORTEXPORT"
+        if not hoops_executable:
+            hoops_discovered = discover_executable(
+                HOOPS_IMPORTEXPORT_EXECUTABLES,
+                HOOPS_IMPORTEXPORT_PATHS,
+            )
+            if hoops_discovered:
+                hoops_executable = hoops_discovered[0]
+                hoops_detected_via = hoops_discovered[1]
+        if not hoops_executable:
+            raise BackendNotFoundError(
+                "HOOPS Exchange backend requested but the ImportExport sample was not found. "
+                "Set --backend-executable or CATPART_HOOPS_IMPORTEXPORT_BIN."
+            )
+        return BackendSpec(
+            name="hoops_exchange_importexport",
+            executable=normalize_path(hoops_executable),
+            template=hoops_template,
+            detected_via=hoops_detected_via,
+        )
+
     if args.backend in {"auto", "3dtool"} and not executable_override and not template_override:
         threedtool_backend = discover_3dtool_backend()
         if threedtool_backend["available"]:
@@ -2147,16 +2246,17 @@ def resolve_backend(args: argparse.Namespace) -> BackendSpec:
         "proprietary format.\n\n"
         "Recommended setup:\n"
         "1. Install a converter backend such as CAD Exchanger Batch, Datakit CrossManager CLI, "
-        "3D-Tool NativeCAD Converter, or use CATIA V5 batch mode.\n"
+        "HOOPS Exchange ImportExport, 3D-Tool NativeCAD Converter, or use CATIA V5 batch mode.\n"
         "2. Set CATPART_CONVERTER_BIN to a converter executable, CATPART_CATIA_CATSTART_BIN "
         "to CATIA catstart, CATPART_DATKIT_BIN plus CATPART_DATKIT_TEMPLATE, or "
-        "CATPART_THREEDTOOL_BIN.\n"
+        "CATPART_HOOPS_IMPORTEXPORT_BIN, or CATPART_THREEDTOOL_BIN.\n"
         "3. Optionally set CATPART_CONVERTER_TEMPLATE if your converter uses different flags.\n\n"
         "Example:\n"
         '  export CATPART_CONVERTER_BIN="/absolute/path/to/ExchangerConv"\n'
         '  export CATPART_CONVERTER_TEMPLATE=\'"{executable}" -i "{input}" -e "{output}"\'\n'
         '  export CATPART_CATIA_CATSTART_BIN="/path/to/DassaultSystemes/Bxx/code/command/catstart"\n'
         '  export CATPART_DATKIT_BIN="/absolute/path/to/CrossManagerCLI"\n'
+        '  export CATPART_HOOPS_IMPORTEXPORT_BIN="/path/to/ImportExport"\n'
         '  export CATPART_THREEDTOOL_BIN="C:/Program Files/3D-Tool V17/Convert.exe"'
     )
 

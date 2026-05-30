@@ -203,11 +203,13 @@ class ConvertCatpartTests(unittest.TestCase):
 
         self.assertIn("catia_v5_batch", candidates)
         self.assertIn("datakit_crossmanager_cli", candidates)
+        self.assertIn("hoops_exchange_importexport", candidates)
         self.assertIn("three_d_tool", candidates)
         self.assertIn("cad_exchanger_batch", candidates)
 
     def test_exchange_output_formats_are_cli_selectable(self) -> None:
         self.assertIn("brp", convert_catpart.FORMAT_EXTENSIONS)
+        self.assertIn("prc", convert_catpart.FORMAT_EXTENSIONS)
         self.assertIn("sat", convert_catpart.FORMAT_EXTENSIONS)
         self.assertTrue(
             convert_catpart.FREECAD_CONVERT_OUTPUT_FORMATS.issubset(
@@ -278,6 +280,64 @@ class ConvertCatpartTests(unittest.TestCase):
         self.assertEqual(backend.name, "datakit_crossmanager_cli")
         self.assertEqual(backend.executable, str(executable.resolve()))
         self.assertIn("--input", backend.template)
+
+    def test_resolve_hoops_backend_from_env(self) -> None:
+        original = os.environ.get("CATPART_HOOPS_IMPORTEXPORT_BIN")
+        os.environ["CATPART_HOOPS_IMPORTEXPORT_BIN"] = "/bin/echo"
+        try:
+            args = argparse.Namespace(
+                backend="hoops",
+                backend_executable=None,
+                backend_cmd=None,
+            )
+
+            backend = convert_catpart.resolve_backend(args)
+        finally:
+            if original is None:
+                os.environ.pop("CATPART_HOOPS_IMPORTEXPORT_BIN", None)
+            else:
+                os.environ["CATPART_HOOPS_IMPORTEXPORT_BIN"] = original
+
+        self.assertEqual(backend.name, "hoops_exchange_importexport")
+        self.assertEqual(backend.executable, "/bin/echo")
+        self.assertEqual(backend.template, convert_catpart.HOOPS_IMPORTEXPORT_TEMPLATE)
+
+    def test_resolve_hoops_backend_cmd_with_path_discovery(self) -> None:
+        original_path = os.environ.get("PATH")
+        original_bin = os.environ.get("CATPART_HOOPS_IMPORTEXPORT_BIN")
+        original_template = os.environ.get("CATPART_HOOPS_TEMPLATE")
+        os.environ.pop("CATPART_HOOPS_IMPORTEXPORT_BIN", None)
+        os.environ.pop("CATPART_HOOPS_TEMPLATE", None)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            executable = Path(temp_dir) / "ImportExport"
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+            os.environ["PATH"] = f"{temp_dir}{os.pathsep}{original_path or ''}"
+            try:
+                args = argparse.Namespace(
+                    backend="hoops",
+                    backend_executable=None,
+                    backend_cmd='"{executable}" "{input}" "{output}"',
+                )
+
+                backend = convert_catpart.resolve_backend(args)
+            finally:
+                if original_path is None:
+                    os.environ.pop("PATH", None)
+                else:
+                    os.environ["PATH"] = original_path
+                if original_bin is None:
+                    os.environ.pop("CATPART_HOOPS_IMPORTEXPORT_BIN", None)
+                else:
+                    os.environ["CATPART_HOOPS_IMPORTEXPORT_BIN"] = original_bin
+                if original_template is None:
+                    os.environ.pop("CATPART_HOOPS_TEMPLATE", None)
+                else:
+                    os.environ["CATPART_HOOPS_TEMPLATE"] = original_template
+
+        self.assertEqual(backend.name, "hoops_exchange_importexport")
+        self.assertEqual(backend.executable, str(executable.resolve()))
+        self.assertEqual(backend.template, '"{executable}" "{input}" "{output}"')
 
     def test_resolve_datakit_backend_requires_template(self) -> None:
         original_bin = os.environ.get("CATPART_DATKIT_BIN")

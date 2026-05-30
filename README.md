@@ -7,10 +7,11 @@ The plugin itself does not reverse-engineer CATPart directly. Instead, it wraps 
 - Recommended readable output: `STEP` (`.step` / `.stp`)
 - Native CATIA path: if CATIA V5 `catstart` is installed, `--backend catia` can run a generated CATScript to export `.CATPart` and collect native `Product.Analyze` mass properties
 - Datakit path: if Datakit CrossManager CLI is installed and its command template is provided, `--backend datakit` can be used for CATIA V5 to STEP conversion
+- HOOPS path: if the HOOPS Exchange SDK `ImportExport` sample is built and licensed, `--backend hoops` can use its `ImportExport input output` command shape for CATIA V5 file-to-file conversion
 - 3D-Tool path: on Windows with 3D-Tool NativeCAD Converter installed, `--backend 3dtool` uses the documented `Convert.exe -i ... -o ...` batch interface
 - Local `STEP` conversion: existing `.step` / `.stp` files can be converted with `FreeCAD` without a CATPart-specific backend
 - Mesh outputs: `OBJ`, `STL`, `GLTF`, `GLB`
-- Exchange outputs: `IGES`, `BREP` / `BRP`, `SAT`, `X_T`, `X_B`
+- Exchange outputs: `IGES`, `BREP` / `BRP`, `PRC`, `SAT`, `X_T`, `X_B`
 
 After conversion, the script now inspects supported outputs automatically:
 
@@ -109,6 +110,15 @@ python3 scripts/convert_catpart.py /path/to/part.CATPart --backend datakit --for
 
 Datakit's public pages confirm CATIA V5 input and multiple exchange outputs including STEP, but do not publish a stable command syntax in the pages available here, so this plugin requires `CATPART_DATKIT_TEMPLATE` instead of guessing.
 
+Use HOOPS Exchange when the SDK is licensed and the `ImportExport` sample is built:
+
+```bash
+export CATPART_HOOPS_IMPORTEXPORT_BIN="/path/to/HOOPS_Exchange/samples/exchange/exchangesource/ImportExport/ImportExport"
+python3 scripts/convert_catpart.py /path/to/part.CATPart --backend hoops --format step
+```
+
+Tech Soft 3D's public documentation shows the macOS `ImportExport` sample running from Terminal and converting CATIA V5 files by passing an input path and output path. This plugin uses that documented command shape by default; set `CATPART_HOOPS_TEMPLATE` if your built sample wrapper needs different arguments.
+
 Use 3D-Tool NativeCAD Converter on Windows:
 
 ```bash
@@ -138,10 +148,10 @@ python3 scripts/convert_catpart.py \
 
 ## Backend Configuration
 
-The script supports three modes:
+The script supports these backend modes:
 
 1. `--backend auto`
-   Looks for a configured template first, then tries common `CAD Exchanger` executable names.
+   Looks for a configured template first, then tries configured native CATPart-capable backends and common executable names.
 
 2. `--backend cadexchanger`
    Uses the built-in preset command shape:
@@ -150,7 +160,19 @@ The script supports three modes:
 {executable} -i {input} -e {output}
 ```
 
-3. `--backend custom`
+3. `--backend catia`
+   Uses CATIA V5 batch automation through `catstart`.
+
+4. `--backend datakit`
+   Uses Datakit CrossManager CLI with a configured command template.
+
+5. `--backend hoops`
+   Uses the HOOPS Exchange `ImportExport` sample command shape.
+
+6. `--backend 3dtool`
+   Uses 3D-Tool NativeCAD Converter on Windows.
+
+7. `--backend custom`
    Uses your exact command template.
 
 You can configure the backend with environment variables:
@@ -181,6 +203,12 @@ You can configure the backend with environment variables:
 
 - `CATPART_DATKIT_TEMPLATE`
   Required command template for `--backend datakit`, because public Datakit pages confirm CrossManager CLI capability but do not expose stable syntax.
+
+- `CATPART_HOOPS_IMPORTEXPORT_BIN`
+  Optional absolute path to the built HOOPS Exchange `ImportExport` sample. Enables `--backend hoops`.
+
+- `CATPART_HOOPS_TEMPLATE`
+  Optional command template for HOOPS Exchange. Defaults to `"{executable}" "{input}" "{output}"`.
 
 - `CATPART_THREEDTOOL_BIN`
   Optional absolute path to 3D-Tool `Convert.exe`. Enables `--backend 3dtool` with the documented `"{executable}" -i "{input}" -o "{output}"` command shape.
@@ -216,7 +244,7 @@ python3 scripts/convert_catpart.py /path/to/part.CATPart
 - If no backend is installed, the script exits with a clear setup message instead of failing silently.
 - Missing CATPart backends are reported with structured diagnostics, including current FreeCAD capabilities, supported local exchange formats, example external backends, and `CATPART_CONVERTER_BIN` / `CATPART_CONVERTER_TEMPLATE` setup hints.
 - `--backend catia` uses CATIA V5 batch automation through `catstart -run "CNEXT -batch -macro ..."`. It is the preferred path for native CATPart mass/volume when CATIA and the needed licenses are installed locally.
-- `--backend datakit` and `--backend 3dtool` cover additional real-world CATPart converters discovered from vendor documentation. `--probe` reports their environment variables and whether they are detected.
+- `--backend datakit`, `--backend hoops`, and `--backend 3dtool` cover additional real-world CATPart converters discovered from vendor documentation. `--probe` reports their environment variables and whether they are detected.
 - `--probe` now reports both conversion backend availability and local analysis capabilities.
 - `freecadcmd` is auto-detected from `PATH`, common app paths, and common conda environment locations such as `/opt/anaconda3/envs/*/bin/freecadcmd`.
 - For multi-file use, pass multiple input files and an `--output-dir`.
