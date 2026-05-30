@@ -207,6 +207,13 @@ class ConvertCatpartTests(unittest.TestCase):
         self.assertIn("three_d_tool", candidates)
         self.assertIn("cad_exchanger_batch", candidates)
 
+    def test_datakit_probe_searches_cli_app_paths(self) -> None:
+        self.assertIn(
+            "/Applications/CrossManager*.app/Contents/MacOS/CrossManagerCLI",
+            convert_catpart.DATAKIT_CROSSMANAGER_PATHS,
+        )
+        self.assertIn("CrossManagerCLI.exe", convert_catpart.DATAKIT_CROSSMANAGER_EXECUTABLES)
+
     def test_probe_lists_manual_catpart_routes(self) -> None:
         args = argparse.Namespace(
             backend="auto",

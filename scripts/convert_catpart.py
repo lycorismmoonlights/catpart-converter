@@ -80,12 +80,17 @@ CATIA_CATSTART_PATHS = [
 DATAKIT_CROSSMANAGER_EXECUTABLES = [
     "CrossManagerCLI",
     "CrossManagerCli",
+    "CrossManagerCLI.exe",
     "crossmanagercli",
 ]
 DATAKIT_CROSSMANAGER_PATHS = [
     "/Applications/CrossManager*/CrossManagerCLI",
+    "/Applications/CrossManager*.app/Contents/MacOS/CrossManagerCLI",
     "/Applications/Datakit*/CrossManagerCLI",
+    "/Applications/Datakit*.app/Contents/MacOS/CrossManagerCLI",
+    "/Applications/DATAKIT*/CrossManagerCLI",
     "/opt/datakit/*/CrossManagerCLI",
+    "/opt/Datakit/*/CrossManagerCLI",
     "C:/Program Files/Datakit/CrossManager*/CrossManagerCLI.exe",
 ]
 HOOPS_IMPORTEXPORT_EXECUTABLES = [

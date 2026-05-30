@@ -31,7 +31,7 @@ Missing:
 | --- | --- | --- | --- | --- |
 | CATIA V5 batch | Yes, through CATIA `ExportData` | Yes, through CATIA `Product.Analyze` | Requires CATIA V5 and licenses | Implemented as `--backend catia` |
 | CAD Exchanger Batch | Yes, through `ExchangerConv`-style CLI | No native mass path exposed here; analyze exported STEP/BREP/IGES | Commercial, macOS/Windows/Linux product family | Implemented as `--backend cadexchanger` / generic template |
-| Datakit CrossManager CLI | Yes, if licensed and command template is supplied | No native mass path exposed here; analyze exported STEP/BREP/IGES | Commercial; public pages do not expose stable CLI syntax | Implemented as `--backend datakit` |
+| Datakit CrossManager CLI | Yes, if licensed and command template is supplied | No native mass path exposed here; analyze exported STEP/BREP/IGES | Commercial; 2026 product note says no-GUI CLI runs on Windows, Linux, and macOS; public pages do not expose stable CLI syntax | Implemented as `--backend datakit` |
 | HOOPS Exchange ImportExport | Yes, if SDK sample is built and licensed | SDK can expose B-Rep/metadata; exact mass extraction would need a dedicated SDK wrapper | Commercial SDK; macOS sample path documented | Implemented as `--backend hoops` |
 | 3D-Tool NativeCAD Converter | Yes, through `Convert.exe -i ... -o ...` | No native mass path exposed here; analyze exported STEP/BREP/IGES | Windows-only commercial tool | Implemented as `--backend 3dtool` |
 
@@ -72,6 +72,8 @@ python3 scripts/convert_catpart.py --probe
 - Autodesk Fusion file formats: https://www.autodesk.com/support/technical/article/caas/sfdcarticles/sfdcarticles/File-formats-supported-by-Fusion-360.html
 - Autodesk Fusion export formats: https://www.autodesk.com/support/technical/article/caas/sfdcarticles/sfdcarticles/Export-format-options-for-Fusion-360.html
 - Autodesk Fusion `ImportManager` API: https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/ImportManager.htm
+- Datakit CrossManager CLI: https://www.datakit.com/en/news/product-focus-crossmanager-cli-241.html
+- Datakit CrossManager formats/licensing: https://www.datakit.com.cn/crossmanager.html
 - SimLab CADVRter: https://www.cadinterop.com/en/our-products/simlab/simlab-cadvrter.html
 - TransMagic converter: https://transmagic.com/cad-file-converter/
 - TransMagic COMMAND: https://support.transmagic.com/hc/en-us/articles/201894039-What-is-TM-Command
