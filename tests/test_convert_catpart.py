@@ -207,6 +207,21 @@ class ConvertCatpartTests(unittest.TestCase):
         self.assertIn("three_d_tool", candidates)
         self.assertIn("cad_exchanger_batch", candidates)
 
+    def test_probe_lists_manual_catpart_routes(self) -> None:
+        args = argparse.Namespace(
+            backend="auto",
+            backend_executable=None,
+            backend_cmd=None,
+        )
+
+        payload = convert_catpart.probe_environment(args)
+        manual_routes = payload["analysis_capabilities"]["manual_catpart_routes"]
+        fusion = manual_routes["autodesk_fusion_manual_gui"]
+
+        self.assertIn("autodesk_fusion_manual_gui", manual_routes)
+        self.assertEqual(fusion["automation_level"], "manual_or_gui_assisted")
+        self.assertIn("why_not_automatic_backend", fusion)
+
     def test_exchange_output_formats_are_cli_selectable(self) -> None:
         self.assertIn("brp", convert_catpart.FORMAT_EXTENSIONS)
         self.assertIn("prc", convert_catpart.FORMAT_EXTENSIONS)

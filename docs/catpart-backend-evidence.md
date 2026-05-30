@@ -46,6 +46,7 @@ Missing:
 | TransMagic COMMAND | Vendor pages list CATIA V5 read and STEP write; COMMAND is a Windows executable command interface. | Viable commercial Windows backend, but no macOS executable found here. Can be used through `--backend custom` if installed elsewhere. |
 | CADfix | CAD Interop page lists CATIA V5 import and STEP export; matrix notes Windows-only for CADfix 13 SP2 DX/CAE. | Viable commercial Windows backend, not currently useful on this Mac. |
 | NVIDIA Omniverse CAD Converter | Docs list CATIA V5 files and local/batch CAD converter service, but target is USD. | Useful for USD ingestion, not direct STEP or exact mass/volume. Not adopted for this plugin's STEP target. |
+| ODA MCAD SDK | Official ODA page advertises native MCAD access, exact B-Rep, Common API to STEP, and macOS support. However, the same page states the free trial currently supports SolidWorks and Inventor only; CATIA `.CATPart` geometry is scheduled for beta in July 2026 and full release later. | Promising future SDK route, but not a usable CATPart backend on this machine as of 2026-05-30. Not adopted yet. |
 | SpinFire Convert / Theorem | Vendor pages describe CATIA V5 independent and batch translation solutions. | Viable commercial backend class, but no installed executable or public command template found locally. Can be configured via `--backend custom`. |
 
 ## Practical Next Steps
@@ -62,6 +63,8 @@ python3 scripts/convert_catpart.py --probe
 
 4. Avoid treating CAD Assistant, FreeCAD, or generic OCCT as native CATPart readers. They remain valuable after conversion, not before.
 
+5. Treat Autodesk Fusion as a manual GUI route unless a custom Fusion add-in is available. The plugin's `--probe` reports it separately from automatic CATPart backends.
+
 ## Sources
 
 - CAD Assistant: https://www.opencascade.com/products/cad-assistant/
@@ -74,4 +77,5 @@ python3 scripts/convert_catpart.py --probe
 - TransMagic COMMAND: https://support.transmagic.com/hc/en-us/articles/201894039-What-is-TM-Command
 - HOOPS Exchange ImportExport setup: https://docs.techsoft3d.com/exchange/2024.8.0/tutorials/environment-setup.html
 - NVIDIA Omniverse CAD Converter service: https://docs.omniverse.nvidia.com/kit/docs/omni.services.convert.cad/503.2.5/Overview.html
+- ODA MCAD SDK: https://www.opendesign.com/products/mcad-sdk
 - SpinFire Convert / Theorem CATIA V5: https://www.techsoft3d.com/enterprise/spinfire-convert/cad-data-translation/catia-v5/

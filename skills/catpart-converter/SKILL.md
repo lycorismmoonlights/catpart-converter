@@ -105,6 +105,7 @@ If no CATPart-capable backend is found, `--probe` returns structured diagnostics
 - `STEP` text summaries include numeric ranges and value-type counts for integers, reals, scientific notation, logicals, enumerations, references, strings, omitted values, and derived values.
 - Local FreeCAD conversion can convert existing `STEP/STP/BREP/IGES/IGS` inputs to `STEP/STP/BREP/IGES/IGS/STL/OBJ` when `--backend auto` is used.
 - `--probe` reports candidate native CATPart backends for CATIA V5 batch, Datakit CrossManager CLI, HOOPS Exchange ImportExport, 3D-Tool NativeCAD Converter, and CAD Exchanger Batch.
+- `--probe` reports manual CATPart routes such as Autodesk Fusion separately from automatic backends; do not treat a manual route as plugin-level conversion availability.
 - Datakit, HOOPS, and 3D-Tool are conversion backends only in this plugin. Exact native mass/volume still requires CATIA `Product.Analyze`, or a successful STEP/BREP/IGES export followed by FreeCAD analysis.
 - Use `--analysis-only` when the user already has a converted `STEP`, `OBJ`, `STL`, `BREP`, or `IGES`.
 - Use `--assume-unit mm` or `--assume-unit m` for mesh files when unit labeling matters.

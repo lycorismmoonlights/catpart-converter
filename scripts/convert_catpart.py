@@ -97,6 +97,10 @@ HOOPS_IMPORTEXPORT_PATHS = [
     "/Applications/HOOPS*/samples/exchange/exchangesource/ImportExport/ImportExport",
     "/opt/TechSoft3D/HOOPS_Exchange*/samples/exchange/exchangesource/ImportExport/ImportExport",
 ]
+FUSION_APP_PATHS = [
+    "/Applications/Autodesk Fusion.app",
+    "/Applications/Autodesk Fusion 360.app",
+]
 THREED_TOOL_EXECUTABLES = [
     "Convert.exe",
 ]
@@ -1866,6 +1870,35 @@ def discover_3dtool_backend() -> dict[str, Any]:
     }
 
 
+def discover_fusion_manual_route() -> dict[str, Any]:
+    discovered: tuple[str, str] | None = None
+    for candidate in FUSION_APP_PATHS:
+        path = Path(candidate).expanduser()
+        if path.exists():
+            discovered = (str(path.resolve()), f"KNOWN_APP:{path}")
+            break
+
+    return {
+        "available": discovered is not None,
+        "name": "autodesk_fusion_manual_gui",
+        "application": discovered[0] if discovered else None,
+        "detected_via": discovered[1] if discovered else None,
+        "automation_level": "manual_or_gui_assisted",
+        "catpart_import": "Supported by Fusion UI according to Autodesk supported-format docs.",
+        "step_export": "Supported by Fusion export-format docs.",
+        "why_not_automatic_backend": (
+            "The public Fusion ImportManager API does not expose a CATIA/CATPart "
+            "import option, so this plugin cannot reliably run CATPart-to-STEP "
+            "headlessly through Fusion."
+        ),
+        "requires": [
+            "Installed Autodesk Fusion",
+            "Autodesk sign-in and a license level that includes commercial/native CAD translators",
+            "Manual import/open/export flow, or a custom Fusion add-in outside this CLI",
+        ],
+    }
+
+
 def discover_native_backend_candidates() -> dict[str, Any]:
     return {
         "catia_v5_batch": discover_catia_batch_backend(),
@@ -1885,6 +1918,12 @@ def discover_native_backend_candidates() -> dict[str, Any]:
     }
 
 
+def discover_manual_catpart_routes() -> dict[str, Any]:
+    return {
+        "autodesk_fusion_manual_gui": discover_fusion_manual_route(),
+    }
+
+
 def catpart_backend_diagnostics(
     exact_geometry_backend: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1892,6 +1931,7 @@ def catpart_backend_diagnostics(
         exact_geometry_backend = discover_exact_geometry_backend()
     catia_batch_backend = discover_catia_batch_backend()
     native_backend_candidates = discover_native_backend_candidates()
+    manual_catpart_routes = discover_manual_catpart_routes()
 
     freecad_cmd = exact_geometry_backend.get("freecad_cmd") or {}
     freecad_convert_script = exact_geometry_backend.get("freecad_convert_script") or {}
@@ -1934,6 +1974,7 @@ def catpart_backend_diagnostics(
         ],
         "catia_batch_backend": catia_batch_backend,
         "native_backend_candidates": native_backend_candidates,
+        "manual_catpart_routes": manual_catpart_routes,
         "configuration": {
             "CATPART_CONVERTER_BIN": "Absolute path to a CATPart-capable converter executable.",
             "CATPART_CONVERTER_TEMPLATE": (
@@ -1971,6 +2012,7 @@ def probe_environment(args: argparse.Namespace) -> dict[str, Any]:
     exact_geometry_backend = discover_exact_geometry_backend()
     catia_batch_backend = discover_catia_batch_backend()
     native_backend_candidates = discover_native_backend_candidates()
+    manual_catpart_routes = discover_manual_catpart_routes()
     try:
         backend = resolve_backend(args)
     except BackendNotFoundError as exc:
@@ -2015,6 +2057,7 @@ def probe_environment(args: argparse.Namespace) -> dict[str, Any]:
             "native_catpart_with_catia_batch": catia_batch_backend["available"],
             "catia_batch_backend": catia_batch_backend,
             "native_backend_candidates": native_backend_candidates,
+            "manual_catpart_routes": manual_catpart_routes,
         },
     }
 

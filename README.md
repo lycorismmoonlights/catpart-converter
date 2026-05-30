@@ -246,6 +246,7 @@ python3 scripts/convert_catpart.py /path/to/part.CATPart
 - Missing CATPart backends are reported with structured diagnostics, including current FreeCAD capabilities, supported local exchange formats, example external backends, and `CATPART_CONVERTER_BIN` / `CATPART_CONVERTER_TEMPLATE` setup hints.
 - `--backend catia` uses CATIA V5 batch automation through `catstart -run "CNEXT -batch -macro ..."`. It is the preferred path for native CATPart mass/volume when CATIA and the needed licenses are installed locally.
 - `--backend datakit`, `--backend hoops`, and `--backend 3dtool` cover additional real-world CATPart converters discovered from vendor documentation. `--probe` reports their environment variables and whether they are detected.
+- `--probe` also separates manual GUI routes such as Autodesk Fusion from automatic backends, so Fusion can be tracked without being misreported as a headless converter.
 - `--probe` now reports both conversion backend availability and local analysis capabilities.
 - `freecadcmd` is auto-detected from `PATH`, common app paths, and common conda environment locations such as `/opt/anaconda3/envs/*/bin/freecadcmd`.
 - For multi-file use, pass multiple input files and an `--output-dir`.
